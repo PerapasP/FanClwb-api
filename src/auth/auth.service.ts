@@ -1,108 +1,124 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  BadRequestException,
-} from '@nestjs/common';
-import { LoginDto, RegisterDto, AuthResponseDto } from './dto/auth.dto';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { FirebaseService } from '../firebase/firebase.service';
+import { TempTokenPayload } from './types/auth.types';
 
 @Injectable()
 export class AuthService {
-  // Mock users database - replace with actual database
-  private users = [
-    {
-      id: '1',
-      email: 'admin@example.com',
-      password: 'password123', // In real app, this should be hashed
-      fullName: 'Admin User',
-    },
-    {
-      id: '2',
-      email: 'user@example.com',
-      password: 'password123',
-      fullName: 'Regular User',
-    },
-  ];
+  constructor(
+    private prisma: PrismaService,
+    private firebase: FirebaseService,
+    private jwt: JwtService,
+  ) {}
 
-  async login(loginDto: LoginDto): Promise<AuthResponseDto> {
-    const { email, password } = loginDto;
-    // Find user by email
-    const user = this.users.find((u) => u.email === email);
-    if (!user || user.password !== password) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+  async loginWithGoogle(idToken: string) {
+    const decoded = await this.firebase.verifyIdToken(idToken).catch(() => {
+      throw new UnauthorizedException('Invalid Google token');
+    });
 
-    // Generate mock JWT token (in real app, use @nestjs/jwt)
-    const accessToken = `mock-jwt-token-${user.id}-${Date.now()}`;
+    const isGoogleProvider = decoded.firebase.sign_in_provider === 'google.com';
+    if (!isGoogleProvider)
+      throw new UnauthorizedException('Not a Google login');
 
-    return {
-      access_token: accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-      },
-    };
-  }
+    let user = await this.prisma.users.findUnique({
+      where: { social_id: decoded.uid },
+    });
 
-  async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
-    const { email, password, fullName } = registerDto;
-    // Check if user already exists
-    const existingUser = this.users.find((u) => u.email === email);
-    if (existingUser) {
-      throw new BadRequestException('Email already exists');
-    }
-
-    // Create new user
-    const newUser = {
-      id: (this.users.length + 1).toString(),
-      email,
-      password, // In real app, hash this password
-      fullName,
-    };
-
-    this.users.push(newUser);
-
-    // Generate mock JWT token
-    const accessToken = `mock-jwt-token-${newUser.id}-${Date.now()}`;
-
-    return {
-      access_token: accessToken,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        fullName: newUser.fullName,
-      },
-    };
-  }
-
-  async forgotPassword(email: string): Promise<{ message: string }> {
-    // Find user by email
-    const user = this.users.find((u) => u.email === email);
     if (!user) {
-      // Don't reveal if email exists or not for security
-      return {
-        message: 'If the email exists, a password reset link has been sent',
-      };
+      user = await this.prisma.users.create({
+        data: {
+          social_id: decoded.uid,
+          email: decoded.email!,
+          fullname: typeof decoded.name === 'string' ? decoded.name : null,
+        },
+      });
     }
 
-    // In real app, send email with reset token
-    console.log(`Password reset requested for: ${email}`);
-    return {
-      message: 'If the email exists, a password reset link has been sent',
-    };
+    const accessToken = this.signAccessToken(user.user_id);
+    const refreshToken = this.signRefreshToken(user.user_id);
+
+    return { accessToken, refreshToken };
   }
 
-  async refreshToken(refreshToken: string): Promise<{ access_token: string }> {
-    // In real app, validate the refresh token
-    if (!refreshToken) {
-      throw new UnauthorizedException('Invalid refresh token');
+  async verifyPhone(userId: string, phoneIdToken: string) {
+    try {
+      const decoded = await this.firebase
+        .verifyIdToken(phoneIdToken)
+        .catch(() => {
+          throw new UnauthorizedException('Invalid phone token');
+        });
+
+      const isPhoneProvider = decoded.firebase.sign_in_provider === 'phone';
+      if (!isPhoneProvider)
+        throw new UnauthorizedException('Not a phone login');
+
+      const user = await this.prisma.users.update({
+        where: { user_id: userId },
+        data: {
+          phone_number: decoded.phone_number,
+          is_verified: true,
+        },
+      });
+
+      const accessToken = this.signAccessToken(user.user_id);
+      const refreshToken = this.signRefreshToken(user.user_id);
+
+      return { accessToken, refreshToken };
+    } catch (error) {
+      throw new UnauthorizedException('Error: ' + error);
     }
+  }
 
-    // Generate new mock access token
-    const newAccessToken = `mock-jwt-token-refreshed-${Date.now()}`;
+  async refreshAccessToken(userId: string): Promise<string> {
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+    });
 
-    return {
-      access_token: newAccessToken,
-    };
+    if (!user) throw new UnauthorizedException('User not found');
+
+    return this.signAccessToken(user.user_id);
+  }
+
+  async getMe(userId: string) {
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+    });
+
+    if (!user) throw new UnauthorizedException('User not found');
+    return user;
+  }
+
+  private signTempToken(userId: string) {
+    return this.jwt.sign(
+      { sub: userId, type: 'temp' },
+      { secret: process.env.JWT_TEMP_SECRET, expiresIn: '10m' },
+    );
+  }
+
+  private signAccessToken(userId: string) {
+    return this.jwt.sign(
+      { sub: userId, type: 'access' },
+      {
+        secret: process.env.JWT_ACCESS_SECRET,
+        expiresIn: '15m',
+      },
+    );
+  }
+
+  private signRefreshToken(userId: string) {
+    return this.jwt.sign(
+      { sub: userId, type: 'refresh' },
+      {
+        secret: process.env.JWT_REFRESH_SECRET,
+        expiresIn: '30d',
+      },
+    );
+  }
+
+  verifyTempToken(token: string): TempTokenPayload {
+    return this.jwt.verify(token, {
+      secret: process.env.JWT_TEMP_SECRET,
+    });
   }
 }

@@ -2,9 +2,19 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(cookieParser());
+
+  app.enableCors({
+    origin: process.env.FRONTEND_URL,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   // Enable validation globally
   app.useGlobalPipes(
@@ -17,8 +27,8 @@ async function bootstrap() {
 
   // Swagger configuration
   const config = new DocumentBuilder()
-    .setTitle('InlarnTax API')
-    .setDescription('The InlarnTax API documentation for tax management system')
+    .setTitle('Fanclwb API')
+    .setDescription('The Fanclwb API documentation for tax management system')
     .setVersion('1.0.0')
     .addTag('Health', 'Health check endpoints')
     .addTag('Authentication', 'User authentication endpoints')
