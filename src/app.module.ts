@@ -8,6 +8,11 @@ import { ProfileModule } from './profile/profile.module';
 import { PrismaService } from './prisma/prisma.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { FirebaseModule } from './firebase/firebase.module';
+import { CoinService } from './coin/coin.service';
+import { CoinController } from './coin/coin.controller';
+import { CoinModule } from './coin/coin.module';
+import { OmiseService } from './omise/omise.service';
+import { OmiseModule } from './omise/omise.module';
 
 @Module({
   imports: [
@@ -17,8 +22,16 @@ import { FirebaseModule } from './firebase/firebase.module';
     ProfileModule,
     PrismaModule,
     FirebaseModule,
+    CoinModule,
+    OmiseModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, PrismaService, FirebaseModule],
+  controllers: [AppController, CoinController],
+  providers: [
+    AppService,
+    PrismaService,
+    FirebaseModule,
+    CoinService,
+    OmiseService,
+  ],
 })
 export class AppModule {}

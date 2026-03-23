@@ -12,7 +12,95 @@ model users {
   fullname     String?   @db.VarChar
   email        String?   @db.VarChar
   phone_number String?   @db.VarChar
+  coins        Int       @default(0)
+  bonus_coins  Int       @default(0)
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
   updated_at   DateTime? @updatedAt @db.Timestamptz(6)
   is_verified  Boolean?  @default(false)
+
+  coin_transactions     coin_transactions[]
+  coin_bonus_expirations coin_bonus_expirations[]
+}
+
+// Package coins
+model coin_packages {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  coins           Int
+  bonus_coins     Int       @default(0)
+  price_thb       Int
+  original_price  Int?
+  discount_label  String?   @db.VarChar
+  is_active       Boolean   @default(true)
+  is_popular      Boolean   @default(false)
+  sort_order      Int       @default(0)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @updatedAt @db.Timestamptz(6)
+
+  coin_topups     coin_topups[]
+
+  @@index([is_active, sort_order])
+}
+
+model coin_transactions {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String              @db.Uuid
+  type         CoinTransactionType // topup, spend, bonus, refund, expire
+  amount       Int                 // จำนวนคอยน์ที่เปลี่ยนแปลง (+ หรือ -)
+  bonus_amount Int                 @default(0) // โบนัสที่ได้รับ (ถ้ามี)
+  balance_after      Int           // balance หลัง transaction (snapshot)
+  bonus_balance_after Int          @default(0)
+  ref_id       String?             @db.VarChar // อ้างอิง เช่น payment_id, order_id
+  note         String?             @db.VarChar // หมายเหตุ
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+
+  user         users               @relation(fields: [user_id], references: [user_id])
+  topup        coin_topups?        // ถ้า type = topup จะมี record นี้
+
+  @@index([user_id])
+  @@index([type])
+}
+
+model coin_topups {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transaction_id String      @unique @db.Uuid
+  package_id     String?     @db.Uuid
+  coins_purchased Int        // คอยน์ที่ซื้อ (ไม่รวมโบนัส)
+  bonus_coins    Int         @default(0)
+  amount_thb     Int         // ยอดเงินจริงที่จ่าย (บาท)
+  payment_method String?     @db.VarChar // promptpay, credit_card ฯลฯ
+  payment_ref    String?     @db.VarChar // ref จาก payment gateway
+  status         TopupStatus @default(pending)
+  created_at     DateTime    @default(now()) @db.Timestamptz(6)
+  paid_at        DateTime?   @db.Timestamptz(6)
+
+  transaction    coin_transactions @relation(fields: [transaction_id], references: [id])
+  package        coin_packages?    @relation(fields: [package_id], references: [id])
+}
+
+model coin_bonus_expirations {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String    @db.Uuid
+  amount       Int
+  expires_at   DateTime  @db.Timestamptz(6)
+  is_expired   Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  user         users     @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id, expires_at])
+}
+
+enum CoinTransactionType {
+  topup    // เติมคอยน์
+  spend    // ใช้คอยน์
+  bonus    // ได้รับโบนัส
+  refund   // คืนคอยน์
+  expire   // โบนัสหมดอายุ
+}
+
+enum TopupStatus {
+  pending   // รอชำระเงิน
+  success   // ชำระเงินสำเร็จ
+  failed    // ล้มเหลว
+  refunded  // คืนเงินแล้ว
 }
