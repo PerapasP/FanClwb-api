@@ -28,7 +28,40 @@ export class CoinService {
     });
   }
 
-  // Create
+  async getCoinBalance(userId: string) {
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+      select: {
+        coins: true,
+        bonus_coins: true,
+      },
+    });
+
+    return {
+      coins: user?.coins ?? 0,
+      bonus_coins: user?.bonus_coins ?? 0,
+      total: (user?.coins ?? 0) + (user?.bonus_coins ?? 0),
+    };
+  }
+
+  async getCoinHistory(userId: string) {
+    return this.prisma.coin_transactions.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        type: true,
+        amount: true,
+        bonus_amount: true,
+        balance_after: true,
+        note: true,
+        created_at: true,
+      },
+    });
+  }
+
+  // Create Payment
   async createPayment(userId: string, dto: CreatePaymentDto) {
     if (dto.package_id) {
       const pkg = await this.prisma.coin_packages.findFirst({
@@ -37,7 +70,6 @@ export class CoinService {
       if (!pkg) throw new BadRequestException('Package not found');
     }
 
-    // 2. สร้าง topup record ก่อน (status = pending)
     const topup = await this.prisma.$transaction(async (tx) => {
       const transaction = await tx.coin_transactions.create({
         data: {
@@ -88,7 +120,6 @@ export class CoinService {
         break;
     }
 
-    // 4. เก็บ charge id ไว้ใน topup
     const omiseCharge = charge as OmiseCharge;
 
     await this.prisma.coin_topups.update({
@@ -106,108 +137,6 @@ export class CoinService {
     };
   }
 
-  async handleWebhook(
-    body: Record<string, unknown>,
-    signature: string,
-    rawBody?: Buffer,
-  ) {
-    // 1. verify signature จาก Omise
-    if (!this.verifyWebhookSignature(rawBody, signature)) {
-      throw new BadRequestException('Invalid webhook signature');
-    }
-
-    const event = body as {
-      key: string;
-      data: {
-        id: string;
-        status: string;
-        metadata: { order_id: string };
-      };
-    };
-
-    // 2. รับแค่ event charge.complete
-    if (event.key !== 'charge.complete') return { received: true };
-
-    const charge = event.data;
-    const topupId = charge.metadata?.order_id;
-
-    if (!topupId) return { received: true };
-
-    // 3. ดึง topup record
-    const topup = await this.prisma.coin_topups.findUnique({
-      where: { id: topupId },
-      include: { transaction: true },
-    });
-
-    if (!topup) return { received: true };
-    if (topup.status !== 'pending') return { received: true }; // ป้องกัน duplicate
-
-    // 4. ถ้าชำระสำเร็จ → อัปเดต coin balance
-    if (charge.status === 'successful') {
-      await this.prisma.$transaction(async (tx) => {
-        // ดึง package ถ้ามี เพื่อเช็ค bonus
-        const pkg = topup.package_id
-          ? await tx.coin_packages.findUnique({
-              where: { id: topup.package_id },
-            })
-          : null;
-
-        const coinsToAdd = pkg?.coins ?? topup.coins_purchased;
-        const bonusToAdd = pkg?.bonus_coins ?? 0;
-
-        // อัปเดต user balance
-        const user = await tx.users.update({
-          where: { user_id: topup.transaction.user_id },
-          data: {
-            coins: { increment: coinsToAdd },
-            bonus_coins: { increment: bonusToAdd },
-          },
-        });
-
-        // อัปเดต transaction
-        await tx.coin_transactions.update({
-          where: { id: topup.transaction_id },
-          data: {
-            amount: coinsToAdd,
-            bonus_amount: bonusToAdd,
-            balance_after: user.coins,
-            bonus_balance_after: user.bonus_coins,
-          },
-        });
-
-        // อัปเดต topup status
-        await tx.coin_topups.update({
-          where: { id: topup.id },
-          data: {
-            status: 'success',
-            paid_at: new Date(),
-          },
-        });
-
-        // ถ้ามีโบนัส → สร้าง expiration record (หมดอายุ 30 วัน)
-        if (bonusToAdd > 0) {
-          await tx.coin_bonus_expirations.create({
-            data: {
-              user_id: topup.transaction.user_id,
-              amount: bonusToAdd,
-              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            },
-          });
-        }
-      });
-    }
-
-    // 5. ถ้าชำระล้มเหลว → อัปเดต topup status
-    if (charge.status === 'failed') {
-      await this.prisma.coin_topups.update({
-        where: { id: topupId },
-        data: { status: 'failed' },
-      });
-    }
-
-    return { received: true };
-  }
-
   async getPaymentStatus(topupId: string, userId: string) {
     const topup = await this.prisma.coin_topups.findFirst({
       where: {
@@ -221,20 +150,168 @@ export class CoinService {
     return { status: topup.status };
   }
 
+  async handleWebhook(
+    body: Record<string, unknown>,
+    signature?: string,
+    rawBody?: Buffer,
+    timestamp?: string,
+  ) {
+    if (signature && timestamp && rawBody) {
+      if (!this.verifyWebhookSignature(rawBody, signature, timestamp)) {
+        throw new BadRequestException('Invalid webhook signature');
+      }
+      console.log('✅ Verified via HMAC');
+    } else {
+      console.log('⚠️ No signature headers');
+    }
+
+    if (body.object !== 'event') {
+      console.log('Not an event object, skipping');
+      return { received: true };
+    }
+
+    const eventKey = body.key as string;
+    const charge = body.data as
+      | {
+          object: string;
+          id: string;
+          status: string;
+          metadata: { order_id: string };
+          paid: boolean;
+        }
+      | undefined;
+
+    console.log('Event key:', eventKey);
+    //console.log('Charge id:', charge?.id);
+
+    if (eventKey !== 'charge.complete') {
+      return { received: true };
+    }
+
+    if (!charge || charge.object !== 'charge') {
+      return { received: true };
+    }
+
+    let verifiedStatus: string;
+    let verifiedOrderId: string | undefined;
+
+    try {
+      const verifiedCharge = await this.omise.getCharge(charge.id);
+      verifiedStatus = verifiedCharge.status;
+
+      const meta = (verifiedCharge as unknown as Record<string, unknown>)
+        .metadata as { order_id?: string } | undefined;
+      verifiedOrderId = meta?.order_id;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Failed to verify charge:', message);
+      throw new BadRequestException('Cannot verify charge');
+    }
+
+    // console.log('Verified status:', verifiedStatus);
+
+    if (verifiedStatus === 'failed') {
+      if (verifiedOrderId) {
+        await this.prisma.coin_topups.update({
+          where: { id: verifiedOrderId },
+          data: { status: 'failed' },
+        });
+      }
+      return { received: true };
+    }
+
+    if (verifiedStatus !== 'successful') {
+      return { received: true };
+    }
+
+    if (!verifiedOrderId) return { received: true };
+
+    const topup = await this.prisma.coin_topups.findUnique({
+      where: { id: verifiedOrderId },
+      include: { transaction: true },
+    });
+
+    if (!topup) return { received: true };
+    if (topup.status !== 'pending') return { received: true };
+
+    await this.prisma.$transaction(async (tx) => {
+      const pkg = topup.package_id
+        ? await tx.coin_packages.findUnique({
+            where: { id: topup.package_id },
+          })
+        : null;
+
+      const coinsToAdd = pkg?.coins ?? topup.coins_purchased;
+      const bonusToAdd = pkg?.bonus_coins ?? 0;
+
+      const user = await tx.users.update({
+        where: { user_id: topup.transaction.user_id },
+        data: {
+          coins: { increment: coinsToAdd },
+          bonus_coins: { increment: bonusToAdd },
+        },
+      });
+
+      await tx.coin_transactions.update({
+        where: { id: topup.transaction_id },
+        data: {
+          amount: coinsToAdd,
+          bonus_amount: bonusToAdd,
+          balance_after: user.coins,
+          bonus_balance_after: user.bonus_coins,
+        },
+      });
+
+      await tx.coin_topups.update({
+        where: { id: topup.id },
+        data: { status: 'success', paid_at: new Date() },
+      });
+
+      if (bonusToAdd > 0) {
+        await tx.coin_bonus_expirations.create({
+          data: {
+            user_id: topup.transaction.user_id,
+            amount: bonusToAdd,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+        });
+      }
+    });
+
+    console.log('✅ Payment processed for topup:', verifiedOrderId);
+    return { received: true };
+  }
+
   private verifyWebhookSignature(
     rawBody?: Buffer,
     signature?: string,
+    timestamp?: string,
   ): boolean {
-    if (!rawBody || !signature) return false;
+    if (process.env.NODE_ENV !== 'production') return true;
+    if (!rawBody || !signature || !timestamp) return false;
 
     const secret = process.env.OMISE_WEBHOOK_SECRET;
     if (!secret) return false;
 
-    const hmac = crypto
-      .createHmac('sha256', secret)
-      .update(rawBody)
-      .digest('hex');
+    const secretBuffer = Buffer.from(secret, 'base64');
+    const signedPayload = `${timestamp}.${rawBody.toString('utf8')}`;
 
-    return hmac === signature;
+    const expectedBuffer = crypto
+      .createHmac('sha256', secretBuffer)
+      .update(signedPayload)
+      .digest();
+
+    const signatures = signature.split(',');
+    for (const sig of signatures) {
+      const sigBuffer = Buffer.from(sig, 'hex');
+      if (
+        sigBuffer.length === expectedBuffer.length &&
+        crypto.timingSafeEqual(sigBuffer, expectedBuffer)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }
