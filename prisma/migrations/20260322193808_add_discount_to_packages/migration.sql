@@ -6,5 +6,4 @@
 */
 -- AlterTable
 ALTER TABLE "coin_packages" ADD COLUMN     "discount_label" VARCHAR,
-ADD COLUMN     "name" VARCHAR NOT NULL,
 ADD COLUMN     "original_price" INTEGER;

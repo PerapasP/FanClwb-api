@@ -13,6 +13,7 @@ import { CoinController } from './coin/coin.controller';
 import { CoinModule } from './coin/coin.module';
 import { OmiseService } from './omise/omise.service';
 import { OmiseModule } from './omise/omise.module';
+import { ArtistModule } from './artist/artist.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { OmiseModule } from './omise/omise.module';
     FirebaseModule,
     CoinModule,
     OmiseModule,
+    ArtistModule,
   ],
   controllers: [AppController, CoinController],
   providers: [
