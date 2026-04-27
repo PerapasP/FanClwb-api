@@ -7,59 +7,73 @@ datasource db {
 }
 
 model users {
-  user_id       String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  social_id     String?      @unique @db.VarChar
-  fullname      String?      @db.VarChar
-  email         String?      @unique @db.VarChar
-  phone_number  String?      @db.VarChar
-  password      String?      @db.VarChar
-  auth_provider AuthProvider @default(google)
-  coins         Int          @default(0)
-  bonus_coins   Int          @default(0)
-  created_at    DateTime     @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime?    @updatedAt @db.Timestamptz(6)
-  is_verified   Boolean?     @default(false)
+  user_id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullname               String?                  @db.VarChar
+  email                  String?                  @unique @db.VarChar
+  phone_number           String?                  @db.VarChar
+  coins                  Int                      @default(0)
+  bonus_coins            Int                      @default(0)
+  role                   UserRole                 @default(fan)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime?                @updatedAt @db.Timestamptz(6)
+  is_verified            Boolean?                 @default(false)
 
-  coin_transactions      coin_transactions[]
   coin_bonus_expirations coin_bonus_expirations[]
+  coin_transactions      coin_transactions[]
   refresh_tokens         refresh_tokens[]
+  identities             user_identities[]
+
+  posts                  posts[]
+  postReactions          post_reactions[]
+  postComments           post_comments[]
+  commentVotes           comment_votes[]
+
+  artist_account         artist_accounts?
+  fandom_memberships     fandom_members[]
+}
+
+model user_identities {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String           @db.Uuid
+  provider   IdentityProvider
+  social_id  String?          @db.VarChar
+  email      String?          @db.VarChar
+  password   String?          @db.VarChar
+  created_at DateTime         @default(now()) @db.Timestamptz(6)
+  user       users            @relation(fields: [user_id], references: [user_id])
+
+  @@unique([provider, social_id])
+  @@unique([provider, email])
+  @@index([user_id])
 }
 
 model refresh_tokens {
   id         String   @id @default(uuid())
   user_id    String   @db.Uuid
   token_hash String
-  token_id   String   @unique
   user_agent String?
   ip_address String?
   expires_at DateTime
   created_at DateTime @default(now())
-
-  user users @relation(fields: [user_id], references: [user_id])
+  token_id   String   @unique
+  user       users    @relation(fields: [user_id], references: [user_id])
 
   @@index([user_id, expires_at])
 }
 
-enum AuthProvider {
-  google
-  email
-}
-
-// Package coins
 model coin_packages {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   coins          Int
-  bonus_coins    Int       @default(0)
+  bonus_coins    Int           @default(0)
   price_thb      Int
+  is_active      Boolean       @default(true)
+  is_popular     Boolean       @default(false)
+  sort_order     Int           @default(0)
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?     @updatedAt @db.Timestamptz(6)
   original_price Int?
-  discount_label String?   @db.VarChar
-  is_active      Boolean   @default(true)
-  is_popular     Boolean   @default(false)
-  sort_order     Int       @default(0)
-  created_at     DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime? @updatedAt @db.Timestamptz(6)
-
-  coin_topups coin_topups[]
+  discount_label String?       @db.VarChar
+  coin_topups    coin_topups[]
 
   @@index([is_active, sort_order])
 }
@@ -67,37 +81,35 @@ model coin_packages {
 model coin_transactions {
   id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id             String              @db.Uuid
-  type                CoinTransactionType // topup, spend, bonus, refund, expire
-  amount              Int // จำนวนคอยน์ที่เปลี่ยนแปลง (+ หรือ -)
-  bonus_amount        Int                 @default(0) // โบนัสที่ได้รับ (ถ้ามี)
-  balance_after       Int // balance หลัง transaction (snapshot)
+  type                CoinTransactionType
+  amount              Int
+  bonus_amount        Int                 @default(0)
+  balance_after       Int
   bonus_balance_after Int                 @default(0)
-  ref_id              String?             @db.VarChar // อ้างอิง เช่น payment_id, order_id
-  note                String?             @db.VarChar // หมายเหตุ
+  ref_id              String?             @db.VarChar
+  note                String?             @db.VarChar
   created_at          DateTime            @default(now()) @db.Timestamptz(6)
-
-  user  users        @relation(fields: [user_id], references: [user_id])
-  topup coin_topups? // ถ้า type = topup จะมี record นี้
+  topup               coin_topups?
+  user                users               @relation(fields: [user_id], references: [user_id])
 
   @@index([user_id])
   @@index([type])
 }
 
 model coin_topups {
-  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  transaction_id  String      @unique @db.Uuid
-  package_id      String?     @db.Uuid
-  coins_purchased Int // คอยน์ที่ซื้อ (ไม่รวมโบนัส)
-  bonus_coins     Int         @default(0)
-  amount_thb      Int // ยอดเงินจริงที่จ่าย (บาท)
-  payment_method  String?     @db.VarChar // promptpay, credit_card ฯลฯ
-  payment_ref     String?     @db.VarChar // ref จาก payment gateway
-  status          TopupStatus @default(pending)
-  created_at      DateTime    @default(now()) @db.Timestamptz(6)
-  paid_at         DateTime?   @db.Timestamptz(6)
-
-  transaction coin_transactions @relation(fields: [transaction_id], references: [id])
-  package     coin_packages?    @relation(fields: [package_id], references: [id])
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transaction_id  String            @unique @db.Uuid
+  coins_purchased Int
+  bonus_coins     Int               @default(0)
+  amount_thb      Int
+  payment_method  String?           @db.VarChar
+  payment_ref     String?           @db.VarChar
+  status          TopupStatus       @default(pending)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  paid_at         DateTime?         @db.Timestamptz(6)
+  package_id      String?           @db.Uuid
+  package         coin_packages?    @relation(fields: [package_id], references: [id])
+  transaction     coin_transactions @relation(fields: [transaction_id], references: [id])
 }
 
 model coin_bonus_expirations {
@@ -107,47 +119,29 @@ model coin_bonus_expirations {
   expires_at DateTime @db.Timestamptz(6)
   is_expired Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
-
-  user users @relation(fields: [user_id], references: [user_id])
+  user       users    @relation(fields: [user_id], references: [user_id])
 
   @@index([user_id, expires_at])
 }
 
-enum CoinTransactionType {
-  topup // เติมคอยน์
-  spend // ใช้คอยน์
-  bonus // ได้รับโบนัส
-  refund // คืนคอยน์
-  expire // โบนัสหมดอายุ
-}
-
-enum TopupStatus {
-  pending // รอชำระเงิน
-  success // ชำระเงินสำเร็จ
-  failed // ล้มเหลว
-  refunded // คืนเงินแล้ว
-}
-
-// ============================================================
-//  ARTIST
-// ============================================================
 model artists {
-  artist_id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artist_category_id String        @db.Uuid
-  label_id           String        @db.Uuid
-  image_url          String?       @db.VarChar(255)
-  name               String?       @db.VarChar(100)
-  slug               String        @unique @db.VarChar(100)
-  status             Boolean       @default(true)
-  created_at         DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime?     @updatedAt @db.Timestamptz(6)
+  artist_id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artist_category_id String            @db.Uuid
+  label_id           String            @db.Uuid
+  image_url          String?           @db.VarChar(255)
+  name               String?           @db.VarChar(100)
+  status             Boolean           @default(true)
+  created_at         DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?         @updatedAt @db.Timestamptz(6)
+  slug               String            @unique @db.VarChar(100)
+  members            artist_members[]
+  sns_links          artist_sns[]
+  category           artist_categories @relation(fields: [artist_category_id], references: [artist_category_id])
+  label              labels            @relation(fields: [label_id], references: [label_id])
+  detail             artists_detail?
 
-  // relations
-  category       artist_categories @relation(fields: [artist_category_id], references: [artist_category_id])
-  label          labels            @relation(fields: [label_id], references: [label_id])
-  detail         artists_detail?
-  sns_links      artist_sns[]
-  members        artist_members[]
+  artist_account     artist_accounts?
+  fandom             fandoms?
 
   @@index([label_id])
   @@index([artist_category_id])
@@ -164,9 +158,7 @@ model artists_detail {
   birth_date       DateTime? @db.Date
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
   updated_at       DateTime? @updatedAt @db.Timestamptz(6)
-
-  // relations
-  artist artists @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
+  artist           artists   @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
 }
 
 model artist_categories {
@@ -175,9 +167,7 @@ model artist_categories {
   slug               String    @unique @db.VarChar(50)
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   updated_at         DateTime? @updatedAt @db.Timestamptz(6)
-
-  // relations
-  artists artists[]
+  artists            artists[]
 }
 
 model labels {
@@ -185,80 +175,346 @@ model labels {
   name       String    @db.VarChar(100)
   created_at DateTime  @default(now()) @db.Timestamptz(6)
   updated_at DateTime? @updatedAt @db.Timestamptz(6)
-
-  // relations
-  artists artists[]
+  artists    artists[]
 }
 
 model artist_members {
-  member_id    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artist_id    String    @db.Uuid
-  name         String    @db.VarChar(100)
-  name_eng     String?   @db.VarChar(100)
-  nickname     String?   @db.VarChar(50)
-  nickname_eng String?   @db.VarChar(50)
-  image_url    String?   @db.VarChar(255)
-  birth_date   DateTime? @db.Date
-  sort_order   Int       @default(0)
-  is_active    Boolean   @default(true)
-  created_at   DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
+  member_id    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artist_id    String       @db.Uuid
+  name         String       @db.VarChar(100)
+  name_eng     String?      @db.VarChar(100)
+  nickname     String?      @db.VarChar(50)
+  nickname_eng String?      @db.VarChar(50)
+  image_url    String?      @db.VarChar(255)
+  birth_date   DateTime?    @db.Date
+  sort_order   Int          @default(0)
+  is_active    Boolean      @default(true)
+  created_at   DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?    @updatedAt @db.Timestamptz(6)
+  artist       artists      @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
+  sns_links    member_sns[]
 
-  // relations
-  artist   artists       @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
-  sns_links member_sns[]
+  artist_account artist_accounts?
 
   @@index([artist_id, is_active])
   @@index([sort_order])
 }
 
-// ============================================================
-//  SNS (Social Network) - ศิลปิน
-// ============================================================
 model sns_platforms {
-  platform_id String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String   @unique @db.VarChar(50) // Instagram, X (Twitter), TikTok, YouTube, Facebook, Weibo
-  base_url    String?  @db.VarChar(255) // https://instagram.com/, https://x.com/
-  sort_order  Int      @default(0)
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-
-  // relations
-  artist_sns artist_sns[]
-  member_sns member_sns[]
+  platform_id String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String       @unique @db.VarChar(50)
+  base_url    String?      @db.VarChar(255)
+  sort_order  Int          @default(0)
+  created_at  DateTime     @default(now()) @db.Timestamptz(6)
+  artist_sns  artist_sns[]
+  member_sns  member_sns[]
 }
 
 model artist_sns {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artist_id   String    @db.Uuid
-  platform_id String    @db.Uuid
-  username    String    @db.VarChar(100)
-  url         String    @db.VarChar(255)
-  sort_order  Int       @default(0)
-  created_at  DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime? @updatedAt @db.Timestamptz(6)
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artist_id   String        @db.Uuid
+  platform_id String        @db.Uuid
+  username    String        @db.VarChar(100)
+  url         String        @db.VarChar(255)
+  sort_order  Int           @default(0)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?     @updatedAt @db.Timestamptz(6)
+  artist      artists       @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
+  platform    sns_platforms @relation(fields: [platform_id], references: [platform_id])
 
-  // relations
-  artist   artists       @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
-  platform sns_platforms @relation(fields: [platform_id], references: [platform_id])
-
-  @@unique([artist_id, platform_id]) // 1 ศิลปิน : 1 platform
+  @@unique([artist_id, platform_id])
   @@index([artist_id])
 }
 
 model member_sns {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  member_id   String    @db.Uuid
-  platform_id String    @db.Uuid
-  username    String    @db.VarChar(100)
-  url         String    @db.VarChar(255)
-  sort_order  Int       @default(0)
-  created_at  DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime? @updatedAt @db.Timestamptz(6)
-
-  // relations
-  member   artist_members @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
-  platform sns_platforms  @relation(fields: [platform_id], references: [platform_id])
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  member_id   String         @db.Uuid
+  platform_id String         @db.Uuid
+  username    String         @db.VarChar(100)
+  url         String         @db.VarChar(255)
+  sort_order  Int            @default(0)
+  created_at  DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?      @updatedAt @db.Timestamptz(6)
+  member      artist_members @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
+  platform    sns_platforms  @relation(fields: [platform_id], references: [platform_id])
 
   @@unique([member_id, platform_id])
   @@index([member_id])
+}
+
+model artist_accounts {
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String              @unique @db.Uuid
+  type       ArtistAccountType
+
+  // เชื่อมได้อย่างใดอย่างหนึ่ง (group artist หรือ solo member)
+  artist_id  String?             @unique @db.Uuid
+  member_id  String?             @unique @db.Uuid
+
+  is_verified Boolean            @default(false)
+  created_at  DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?          @updatedAt @db.Timestamptz(6)
+
+  user       users              @relation(fields: [user_id], references: [user_id])
+  artist     artists?           @relation(fields: [artist_id], references: [artist_id])
+  member     artist_members?    @relation(fields: [member_id], references: [member_id])
+
+  @@index([artist_id])
+  @@index([member_id])
+}
+
+// =============================================
+// FANDOM
+// =============================================
+model fandoms {
+  fandom_id   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artist_id   String    @unique @db.Uuid
+  name        String    @db.VarChar(100)
+  slug        String    @unique @db.VarChar(100)
+  description String?   @db.Text
+  image_url   String?   @db.VarChar(500)
+  banner_url  String?   @db.VarChar(500)
+
+  is_active   Boolean   @default(true)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime? @updatedAt @db.Timestamptz(6)
+
+  artist      artists          @relation(fields: [artist_id], references: [artist_id])
+  members     fandom_members[]
+  posts       posts[]
+
+  @@index([is_active])
+}
+
+model fandom_members {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fandom_id  String           @db.Uuid
+  user_id    String           @db.Uuid
+  role       FandomRole       @default(member)
+  joined_at  DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at DateTime?        @updatedAt @db.Timestamptz(6)
+
+  fandom     fandoms          @relation(fields: [fandom_id], references: [fandom_id], onDelete: Cascade)
+  user       users            @relation(fields: [user_id], references: [user_id])
+
+  @@unique([fandom_id, user_id])
+  @@index([fandom_id, role])
+  @@index([user_id])
+}
+
+// =============================================
+// COMMUNITY - Posts
+// =============================================
+model posts {
+  post_id String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id String  @db.Uuid
+  content String? @db.Text
+
+  // As Artist
+  post_as_type PostAsType  @default(user)
+  post_as_id   String?     @db.Uuid
+
+  // repost
+  repost_of_id String? @db.Uuid
+
+  // From Fandom
+  fandom_id    String?     @db.Uuid
+
+  // counters (denormalized)
+  like_count    Int @default(0)
+  comment_count Int @default(0)
+  repost_count  Int @default(0)
+
+  is_pinned  Boolean   @default(false)
+  is_deleted Boolean   @default(false)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  user      users   @relation(fields: [user_id], references: [user_id])
+  fandom    fandoms? @relation(fields: [fandom_id], references: [fandom_id])
+  repost_of posts?  @relation("PostRepost", fields: [repost_of_id], references: [post_id])
+  reposts   posts[] @relation("PostRepost")
+
+  reactions post_reactions[]
+  comments  post_comments[]
+  images    post_images[]
+
+  @@index([user_id])
+  @@index([repost_of_id])
+  @@index([created_at(sort: Desc)])
+  @@index([is_deleted, created_at(sort: Desc)])
+}
+
+// =============================================
+// COMMUNITY - Post Images (หลายรูปต่อโพสต์)
+// =============================================
+model post_images {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id    String   @db.Uuid
+  image_url  String   @db.VarChar(500)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  post posts @relation(fields: [post_id], references: [post_id], onDelete: Cascade)
+
+  @@index([post_id, sort_order])
+}
+
+// =============================================
+// COMMUNITY - Post Reactions
+// =============================================
+model post_reactions {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id    String       @db.Uuid
+  user_id    String       @db.Uuid
+  type       ReactionType @default(like)
+  created_at DateTime     @default(now()) @db.Timestamptz(6)
+
+  post posts @relation(fields: [post_id], references: [post_id], onDelete: Cascade)
+  user users @relation(fields: [user_id], references: [user_id])
+
+  @@unique([post_id, user_id])
+  @@index([post_id])
+  @@index([user_id])
+}
+
+// =============================================
+// COMMUNITY - Comments
+// =============================================
+model post_comments {
+  comment_id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id    String @db.Uuid
+  user_id    String @db.Uuid
+
+  // nested comment
+  parent_id String? @db.Uuid
+
+  // repost comment
+  repost_of_id String? @db.Uuid
+
+  content String? @db.Text
+
+  // counters (denormalized)
+  upvote_count   Int @default(0)
+  downvote_count Int @default(0)
+  reply_count    Int @default(0)
+  repost_count   Int @default(0)
+
+  depth Int @default(0)
+
+  is_deleted Boolean   @default(false)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  post      posts           @relation(fields: [post_id], references: [post_id], onDelete: Cascade)
+  user      users           @relation(fields: [user_id], references: [user_id])
+  parent    post_comments?  @relation("CommentThread", fields: [parent_id], references: [comment_id])
+  replies   post_comments[] @relation("CommentThread")
+  repost_of post_comments?  @relation("CommentRepost", fields: [repost_of_id], references: [comment_id])
+  reposts   post_comments[] @relation("CommentRepost")
+
+  votes  comment_votes[]
+  images comment_images[]
+
+  @@index([post_id, is_deleted, created_at])
+  @@index([parent_id])
+  @@index([repost_of_id])
+  @@index([user_id])
+  @@index([post_id, parent_id])
+}
+
+// =============================================
+// COMMUNITY - Comment Images
+// =============================================
+model comment_images {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  comment_id String   @db.Uuid
+  image_url  String   @db.VarChar(500)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  comment post_comments @relation(fields: [comment_id], references: [comment_id], onDelete: Cascade)
+
+  @@index([comment_id, sort_order])
+}
+
+// =============================================
+// COMMUNITY - Comment Votes (Upvote / Downvote)
+// =============================================
+model comment_votes {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  comment_id String    @db.Uuid
+  user_id    String    @db.Uuid
+  vote_type  VoteType
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @updatedAt @db.Timestamptz(6)
+
+  comment post_comments @relation(fields: [comment_id], references: [comment_id], onDelete: Cascade)
+  user    users         @relation(fields: [user_id], references: [user_id])
+
+  @@unique([comment_id, user_id])
+  @@index([comment_id])
+  @@index([user_id])
+}
+
+// =============================================
+// ENUMS
+// =============================================
+enum ArtistAccountType {
+  group    
+  solo
+}
+
+enum FandomRole {
+  member
+  moderator
+  admin
+}
+
+enum UserRole {
+  fan
+  artist
+  admin
+}
+
+enum PostAsType {
+  user      
+  artist    
+  member
+}
+
+enum ReactionType {
+  like
+}
+
+enum VoteType {
+  upvote
+  downvote
+}
+
+enum IdentityProvider {
+  google
+  email
+}
+
+enum AuthProvider {
+  google
+  email
+}
+
+enum CoinTransactionType {
+  topup
+  spend
+  bonus
+  refund
+  expire
+}
+
+enum TopupStatus {
+  pending
+  success
+  failed
+  refunded
 }

@@ -83,7 +83,7 @@ export class AuthController {
       try {
         await this.authService.logout(refreshToken);
       } catch {
-        // token ไม่ valid ก็ clear cookie ออกเลย
+        // comment clear
       }
     }
 

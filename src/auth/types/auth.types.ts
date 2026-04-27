@@ -1,3 +1,5 @@
+import { users } from '@prisma/client';
+
 export interface TempTokenPayload {
   sub: string;
   type: 'temp';
@@ -17,4 +19,10 @@ export interface RefreshTokenPayload {
   type: 'refresh';
   iat: number;
   exp: number;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  user?: users;
 }

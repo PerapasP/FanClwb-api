@@ -98,6 +98,37 @@ export class ArtistService {
     return artist;
   }
 
+  async findBySlug(slug: string) {
+    const artist = await this.prisma.artists.findUnique({
+      where: { slug },
+      include: {
+        category: true,
+        label: true,
+        detail: true,
+        sns_links: {
+          include: { platform: true },
+          orderBy: { sort_order: 'asc' },
+        },
+        members: {
+          where: { is_active: true },
+          include: {
+            sns_links: {
+              include: { platform: true },
+              orderBy: { sort_order: 'asc' },
+            },
+          },
+          orderBy: { sort_order: 'asc' },
+        },
+      },
+    });
+
+    if (!artist) {
+      throw new NotFoundException('Artist not found');
+    }
+
+    return artist;
+  }
+
   async findMembers(artistId: string) {
     const artist = await this.prisma.artists.findUnique({
       where: { artist_id: artistId },

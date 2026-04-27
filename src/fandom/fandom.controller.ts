@@ -1,0 +1,114 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '@/auth/guards/optional-jwt-auth.guard';
+import { RolesGuard } from '@/auth/guards/roles.guard';
+import { Roles } from '@/auth/decorators/roles.decorator';
+import { FandomService } from './fandom.service';
+import { CreateFandomDto } from './dto/create-fandom.dto';
+import { UpdateFandomDto } from './dto/update-fandom.dto';
+import { ManageMemberDto } from './dto/manage-member.dto';
+import { PaginationQueryDto } from '@/community/dto/pagination-query.dto';
+import {
+  type AuthenticatedRequest,
+  type OptionalAuthRequest,
+} from '@/auth/interfaces/auth.interface';
+
+@Controller('fandoms')
+export class FandomController {
+  constructor(private readonly fandomService: FandomService) {}
+
+  // ─── ADMIN: สร้าง fandom ─────────────────────────────
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  create(@Body() dto: CreateFandomDto) {
+    return this.fandomService.create(dto);
+  }
+
+  // ─── PUBLIC: ดู fandom ทั้งหมด ────────────────────────
+  @Get()
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.fandomService.findAll(query);
+  }
+
+  // ─── PUBLIC: ดู fandom by slug ────────────────────────
+  @Get(':slug')
+  @UseGuards(OptionalJwtAuthGuard)
+  findBySlug(@Param('slug') slug: string, @Req() req: OptionalAuthRequest) {
+    return this.fandomService.findBySlug(slug, req.user?.user_id);
+  }
+
+  // ─── ADMIN: แก้ไข fandom ──────────────────────────────
+  @Patch(':fandomId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  update(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Body() dto: UpdateFandomDto,
+  ) {
+    return this.fandomService.update(fandomId, dto);
+  }
+
+  // ─── USER: เข้าร่วม fandom ────────────────────────────
+  @Post(':fandomId/join')
+  @UseGuards(JwtAuthGuard)
+  join(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.fandomService.join(fandomId, req.user.user_id);
+  }
+
+  // ─── USER: ออกจาก fandom ──────────────────────────────
+  @Delete(':fandomId/leave')
+  @UseGuards(JwtAuthGuard)
+  leave(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.fandomService.leave(fandomId, req.user.user_id);
+  }
+
+  // ─── PUBLIC: ดูสมาชิก ─────────────────────────────────
+  @Get(':fandomId/members')
+  getMembers(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.fandomService.getMembers(fandomId, query);
+  }
+
+  // ─── MODERATOR+: จัดการ role สมาชิก ────────────────────
+  @Patch(':fandomId/members')
+  @UseGuards(JwtAuthGuard)
+  manageMember(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ManageMemberDto,
+  ) {
+    return this.fandomService.manageMember(fandomId, req.user.user_id, dto);
+  }
+
+  // ─── MODERATOR+: kick สมาชิก ──────────────────────────
+  @Delete(':fandomId/members/:userId')
+  @UseGuards(JwtAuthGuard)
+  kickMember(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.fandomService.kickMember(fandomId, req.user.user_id, userId);
+  }
+}

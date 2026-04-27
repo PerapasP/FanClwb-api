@@ -33,6 +33,12 @@ export class ArtistController {
     return this.artistService.findLabels();
   }
 
+  // GET /artists/by-slug/:slug
+  @Get('by-slug/:slug')
+  findBySlug(@Param('slug') slug: string) {
+    return this.artistService.findBySlug(slug);
+  }
+
   // GET /artists/:artistId
   @Get(':artistId')
   findOne(@Param('artistId', ParseUUIDPipe) artistId: string) {

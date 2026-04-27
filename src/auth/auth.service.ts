@@ -12,6 +12,9 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { SignInDto, SignUpDto } from './dto/auth.dto';
 
+import { users } from '@prisma/client';
+import { AuthResponse } from './types/auth.types';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -34,10 +37,14 @@ export class AuthService {
   }
 
   async signUpWithEmail(dto: SignUpDto) {
-    const existing = await this.prisma.users.findUnique({
-      where: { email: dto.email },
+    const existingIdentity = await this.prisma.user_identities.findFirst({
+      where: {
+        provider: 'email',
+        email: dto.email,
+      },
     });
-    if (existing) throw new BadRequestException('อีเมลนี้ถูกใช้งานแล้ว');
+    if (existingIdentity)
+      throw new BadRequestException('อีเมลนี้ถูกใช้งานแล้ว');
 
     const hashedPassword = await bcrypt.hash(dto.password, this.SALT_ROUNDS);
 
@@ -45,59 +52,40 @@ export class AuthService {
       data: {
         email: dto.email,
         fullname: dto.fullname,
-        password: hashedPassword,
-        auth_provider: 'email',
+        identities: {
+          create: {
+            provider: 'email',
+            email: dto.email,
+            password: hashedPassword,
+          },
+        },
       },
     });
 
-    const { full, tokenId, token } = this.generateRefreshToken();
-    const hashedToken = await bcrypt.hash(token, this.SALT_ROUNDS);
-    const refreshToken = full;
-
-    await this.prisma.refresh_tokens.create({
-      data: {
-        user_id: user.user_id,
-        token_hash: hashedToken,
-        token_id: tokenId,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    const accessToken = this.signAccessToken(user.user_id);
-
-    return { accessToken, refreshToken, user };
+    return this.generateAuthResponse(user.user_id, user);
   }
 
   async signInWithEmail(dto: SignInDto) {
-    const user = await this.prisma.users.findUnique({
-      where: { email: dto.email },
+    const identity = await this.prisma.user_identities.findUnique({
+      where: {
+        provider_email: {
+          provider: 'email',
+          email: dto.email,
+        },
+      },
+      include: { user: true },
     });
 
-    if (!user || user.auth_provider !== 'email' || !user.password) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (!identity || !identity.password) {
+      throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
-    const isMatch = await bcrypt.compare(dto.password, user.password);
+    const isMatch = await bcrypt.compare(dto.password, identity.password);
     if (!isMatch) {
       throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
-    const { full, tokenId, token } = this.generateRefreshToken();
-    const hashedToken = await bcrypt.hash(token, this.SALT_ROUNDS);
-    const refreshToken = full;
-
-    await this.prisma.refresh_tokens.create({
-      data: {
-        user_id: user.user_id,
-        token_hash: hashedToken,
-        token_id: tokenId,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    const accessToken = this.signAccessToken(user.user_id);
-
-    return { accessToken, refreshToken, user };
+    return this.generateAuthResponse(identity.user_id, identity.user);
   }
 
   async loginWithGoogle(idToken: string) {
@@ -109,37 +97,38 @@ export class AuthService {
     if (!isGoogleProvider)
       throw new UnauthorizedException('Not a Google login');
 
-    let user = await this.prisma.users.findUnique({
-      where: { social_id: decoded.uid },
+    const identity = await this.prisma.user_identities.findUnique({
+      where: {
+        provider_social_id: {
+          provider: 'google',
+          social_id: decoded.uid,
+        },
+      },
+      include: { user: true },
     });
 
-    if (!user) {
-      user = await this.prisma.users.create({
+    let userId: string;
+
+    if (!identity) {
+      const newUser = await this.prisma.users.create({
         data: {
-          social_id: decoded.uid,
-          email: decoded.email!,
-          fullname: typeof decoded.name === 'string' ? decoded.name : null,
-          auth_provider: 'google',
+          email: decoded.email,
+          fullname: (decoded.name as string) || 'Google User',
+          identities: {
+            create: {
+              provider: 'google',
+              social_id: decoded.uid,
+              email: decoded.email,
+            },
+          },
         },
       });
+      userId = newUser.user_id;
+    } else {
+      userId = identity.user_id;
     }
 
-    const { full, tokenId, token } = this.generateRefreshToken();
-    const hashedToken = await bcrypt.hash(token, this.SALT_ROUNDS);
-    const refreshToken = full;
-
-    await this.prisma.refresh_tokens.create({
-      data: {
-        user_id: user.user_id,
-        token_hash: hashedToken,
-        token_id: tokenId,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    const accessToken = this.signAccessToken(user.user_id);
-
-    return { accessToken, refreshToken };
+    return this.generateAuthResponse(userId);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -257,6 +246,31 @@ export class AuthService {
 
     if (!user) throw new UnauthorizedException('User not found');
     return user;
+  }
+
+  private async generateAuthResponse(
+    userId: string,
+    userRecord?: users,
+  ): Promise<AuthResponse> {
+    const { full, tokenId, token } = this.generateRefreshToken();
+    const hashedToken = await bcrypt.hash(token, this.SALT_ROUNDS);
+
+    await this.prisma.refresh_tokens.create({
+      data: {
+        user_id: userId,
+        token_hash: hashedToken,
+        token_id: tokenId,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const accessToken = this.signAccessToken(userId);
+
+    return {
+      accessToken,
+      refreshToken: full,
+      user: userRecord,
+    };
   }
 
   private signTempToken(userId: string) {
