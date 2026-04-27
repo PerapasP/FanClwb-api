@@ -1,11 +1,15 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+
+  // Enable Socket.IO WebSocket adapter
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   app.use(cookieParser());
 
@@ -34,6 +38,7 @@ async function bootstrap() {
     .addTag('Authentication', 'User authentication endpoints')
     .addTag('Users', 'User management endpoints')
     .addTag('Profile', 'User profile management endpoints')
+    .addTag('Live Streams', 'Live streaming session management')
     .addBearerAuth()
     .build();
 

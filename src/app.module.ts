@@ -22,6 +22,7 @@ import { ModuleService } from './module/module.service';
 import { ArtistAccountController } from './artist-account/artist-account.controller';
 import { ArtistAccountService } from './artist-account/artist-account.service';
 import { ArtistAccountModule } from './artist-account/artist-account.module';
+import { LiveStreamModule } from './live-stream/live-stream.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ArtistAccountModule } from './artist-account/artist-account.module';
     OmiseModule,
     ArtistModule,
     ArtistAccountModule,
+    LiveStreamModule,
   ],
   controllers: [
     AppController,
