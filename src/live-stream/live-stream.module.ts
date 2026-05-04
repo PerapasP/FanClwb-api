@@ -9,14 +9,13 @@ import { PrismaModule } from '../prisma/prisma.module';
 @Module({
   imports: [
     PrismaModule,
-    // Re-use the same JWT config as the auth module
+    ConfigModule,
     JwtModule.registerAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET'),
+        secret: config.get<string>('JWT_ACCESS_SECRET'),
         signOptions: {
-          expiresIn: config.get<string>('JWT_EXPIRES_IN', '15m') as never,
+          expiresIn: (config.get<string>('JWT_ACCESS_EXPIRES') ?? '15m') as any,
         },
       }),
     }),

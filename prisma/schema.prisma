@@ -7,46 +7,52 @@ datasource db {
 }
 
 model users {
-  user_id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fullname               String?                  @db.VarChar
-  email                  String?                  @unique @db.VarChar
-  phone_number           String?                  @db.VarChar
-  coins                  Int                      @default(0)
-  bonus_coins            Int                      @default(0)
-  role                   UserRole                 @default(fan)
-  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime?                @updatedAt @db.Timestamptz(6)
-  is_verified            Boolean?                 @default(false)
+  user_id      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullname     String?   @db.VarChar
+  email        String?   @unique @db.VarChar
+  image_url    String?   @db.VarChar
+  phone_number String?   @db.VarChar
+  coins        Int       @default(0)
+  bonus_coins  Int       @default(0)
+  role         UserRole  @default(fan)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
+  is_verified  Boolean?  @default(false)
 
   coin_bonus_expirations coin_bonus_expirations[]
   coin_transactions      coin_transactions[]
   refresh_tokens         refresh_tokens[]
   identities             user_identities[]
 
-  posts                  posts[]
-  postReactions          post_reactions[]
-  postComments           post_comments[]
-  commentVotes           comment_votes[]
+  posts         posts[]
+  postReactions post_reactions[]
+  postComments  post_comments[]
+  commentVotes  comment_votes[]
 
-  artist_account         artist_accounts?
-  fandom_memberships     fandom_members[]
+  artist_account     artist_accounts?
+  fandom_memberships fandom_members[]
+  followed_artists   artist_followers[]
 
   // Live streaming
-  hosted_streams         live_streams[]     @relation("StreamHost")
-  stream_views           stream_viewers[]
-  stream_messages        stream_messages[]
-  sent_gifts             stream_gifts[]     @relation("GiftSender")
+  hosted_streams  live_streams[]    @relation("StreamHost")
+  stream_views    stream_viewers[]
+  stream_messages stream_messages[]
+  sent_gifts      stream_gifts[]    @relation("GiftSender")
+  created_fandoms fandoms[]         @relation("FandomCreator")
+
+  fan_projects fan_projects[]
+  donations    fan_project_donations[]
 }
 
 model user_identities {
-  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String           @db.Uuid
-  provider   IdentityProvider
-  social_id  String?          @db.VarChar
-  email      String?          @db.VarChar
-  password   String?          @db.VarChar
-  created_at DateTime         @default(now()) @db.Timestamptz(6)
-  user       users            @relation(fields: [user_id], references: [user_id])
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String       @db.Uuid
+  provider   AuthProvider
+  social_id  String?      @db.VarChar
+  email      String?      @db.VarChar
+  password   String?      @db.VarChar
+  created_at DateTime     @default(now()) @db.Timestamptz(6)
+  user       users        @relation(fields: [user_id], references: [user_id])
 
   @@unique([provider, social_id])
   @@unique([provider, email])
@@ -146,8 +152,10 @@ model artists {
   label              labels            @relation(fields: [label_id], references: [label_id])
   detail             artists_detail?
 
-  artist_account     artist_accounts?
-  fandom             fandoms?
+  artist_account artist_accounts?
+  fandom         fandoms?
+  followers      artist_followers[]
+  posts          posts[]
 
   @@index([label_id])
   @@index([artist_category_id])
@@ -249,21 +257,21 @@ model member_sns {
 }
 
 model artist_accounts {
-  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String              @unique @db.Uuid
-  type       ArtistAccountType
+  id      String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id String            @unique @db.Uuid
+  type    ArtistAccountType
 
   // เชื่อมได้อย่างใดอย่างหนึ่ง (group artist หรือ solo member)
-  artist_id  String?             @unique @db.Uuid
-  member_id  String?             @unique @db.Uuid
+  artist_id String? @unique @db.Uuid
+  member_id String? @unique @db.Uuid
 
-  is_verified Boolean            @default(false)
-  created_at  DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime?          @updatedAt @db.Timestamptz(6)
+  is_verified Boolean   @default(false)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime? @updatedAt @db.Timestamptz(6)
 
-  user       users              @relation(fields: [user_id], references: [user_id])
-  artist     artists?           @relation(fields: [artist_id], references: [artist_id])
-  member     artist_members?    @relation(fields: [member_id], references: [member_id])
+  user   users           @relation(fields: [user_id], references: [user_id])
+  artist artists?        @relation(fields: [artist_id], references: [artist_id])
+  member artist_members? @relation(fields: [member_id], references: [member_id])
 
   @@index([artist_id])
   @@index([member_id])
@@ -273,39 +281,59 @@ model artist_accounts {
 // FANDOM
 // =============================================
 model fandoms {
-  fandom_id   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artist_id   String    @unique @db.Uuid
-  name        String    @db.VarChar(100)
-  slug        String    @unique @db.VarChar(100)
-  description String?   @db.Text
-  image_url   String?   @db.VarChar(500)
-  banner_url  String?   @db.VarChar(500)
+  fandom_id   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String       @db.VarChar(100)
+  description String?      @db.Text
+  image_url   String?      @db.VarChar(500)
+  banner_url  String?      @db.VarChar(500)
+  slug        String       @unique @db.VarChar(100)
+  is_active   Boolean      @default(true)
+  status      FandomStatus @default(pending)
+  creator_id  String?      @db.Uuid
+  rules       String?      @db.Text
+  artist_id   String?      @unique @db.Uuid
+  created_at  DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?    @updatedAt @db.Timestamptz(6)
 
-  is_active   Boolean   @default(true)
-  created_at  DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime? @updatedAt @db.Timestamptz(6)
-
-  artist      artists          @relation(fields: [artist_id], references: [artist_id])
-  members     fandom_members[]
-  posts       posts[]
+  artist       artists?         @relation(fields: [artist_id], references: [artist_id])
+  creator      users?           @relation("FandomCreator", fields: [creator_id], references: [user_id])
+  members      fandom_members[]
+  posts        posts[]
   live_streams live_streams[]
+  fan_projects fan_projects[]
 
+  @@index([artist_id])
   @@index([is_active])
+  @@index([status])
 }
 
 model fandom_members {
-  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fandom_id  String           @db.Uuid
-  user_id    String           @db.Uuid
-  role       FandomRole       @default(member)
-  joined_at  DateTime         @default(now()) @db.Timestamptz(6)
-  updated_at DateTime?        @updatedAt @db.Timestamptz(6)
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fandom_id  String     @db.Uuid
+  user_id    String     @db.Uuid
+  role       FandomRole @default(member)
+  joined_at  DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at DateTime?  @updatedAt @db.Timestamptz(6)
 
-  fandom     fandoms          @relation(fields: [fandom_id], references: [fandom_id], onDelete: Cascade)
-  user       users            @relation(fields: [user_id], references: [user_id])
+  fandom fandoms @relation(fields: [fandom_id], references: [fandom_id], onDelete: Cascade)
+  user   users   @relation(fields: [user_id], references: [user_id])
 
   @@unique([fandom_id, user_id])
   @@index([fandom_id, role])
+  @@index([user_id])
+}
+
+model artist_followers {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artist_id  String   @db.Uuid
+  user_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  artist artists @relation(fields: [artist_id], references: [artist_id], onDelete: Cascade)
+  user   users   @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([artist_id, user_id])
+  @@index([artist_id])
   @@index([user_id])
 }
 
@@ -318,37 +346,38 @@ model posts {
   content String? @db.Text
 
   // As Artist
-  post_as_type PostAsType  @default(user)
-  post_as_id   String?     @db.Uuid
-
-  // repost
-  repost_of_id String? @db.Uuid
+  post_as_type PostAsType @default(user)
+  post_as_id   String?    @db.Uuid
 
   // From Fandom
-  fandom_id    String?     @db.Uuid
+  fandom_id String? @db.Uuid
+
+  // Directly associated with Artist (for non-fandom following)
+  artist_id String? @db.Uuid
 
   // counters (denormalized)
   like_count    Int @default(0)
   comment_count Int @default(0)
-  repost_count  Int @default(0)
 
-  is_pinned  Boolean   @default(false)
-  is_deleted Boolean   @default(false)
-  created_at DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at DateTime? @updatedAt @db.Timestamptz(6)
+  is_exclusive Boolean   @default(false)
+  is_deleted   Boolean   @default(false)
+  is_pinned    Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
 
   // relations
-  user      users   @relation(fields: [user_id], references: [user_id])
-  fandom    fandoms? @relation(fields: [fandom_id], references: [fandom_id])
-  repost_of posts?  @relation("PostRepost", fields: [repost_of_id], references: [post_id])
-  reposts   posts[] @relation("PostRepost")
+  user   users    @relation(fields: [user_id], references: [user_id])
+  fandom fandoms? @relation(fields: [fandom_id], references: [fandom_id])
+  artist artists? @relation(fields: [artist_id], references: [artist_id])
 
   reactions post_reactions[]
   comments  post_comments[]
   images    post_images[]
 
   @@index([user_id])
-  @@index([repost_of_id])
+  @@index([fandom_id])
+  @@index([artist_id])
+  @@index([is_exclusive])
   @@index([created_at(sort: Desc)])
   @@index([is_deleted, created_at(sort: Desc)])
 }
@@ -397,16 +426,12 @@ model post_comments {
   // nested comment
   parent_id String? @db.Uuid
 
-  // repost comment
-  repost_of_id String? @db.Uuid
-
   content String? @db.Text
 
   // counters (denormalized)
   upvote_count   Int @default(0)
   downvote_count Int @default(0)
   reply_count    Int @default(0)
-  repost_count   Int @default(0)
 
   depth Int @default(0)
 
@@ -415,19 +440,16 @@ model post_comments {
   updated_at DateTime? @updatedAt @db.Timestamptz(6)
 
   // relations
-  post      posts           @relation(fields: [post_id], references: [post_id], onDelete: Cascade)
-  user      users           @relation(fields: [user_id], references: [user_id])
-  parent    post_comments?  @relation("CommentThread", fields: [parent_id], references: [comment_id])
-  replies   post_comments[] @relation("CommentThread")
-  repost_of post_comments?  @relation("CommentRepost", fields: [repost_of_id], references: [comment_id])
-  reposts   post_comments[] @relation("CommentRepost")
+  post    posts           @relation(fields: [post_id], references: [post_id], onDelete: Cascade)
+  user    users           @relation(fields: [user_id], references: [user_id])
+  parent  post_comments?  @relation("CommentThread", fields: [parent_id], references: [comment_id])
+  replies post_comments[] @relation("CommentThread")
 
   votes  comment_votes[]
   images comment_images[]
 
   @@index([post_id, is_deleted, created_at])
   @@index([parent_id])
-  @@index([repost_of_id])
   @@index([user_id])
   @@index([post_id, parent_id])
 }
@@ -471,50 +493,53 @@ model comment_votes {
 // =============================================
 
 model gift_types {
-  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String         @unique @db.VarChar(50)   // e.g. "rose", "crown"
-  display_name String         @db.VarChar(100)           // e.g. "Rose 🌹"
-  icon_url     String?        @db.VarChar(500)
-  coin_value   Int                                       // cost in coins per unit
-  sort_order   Int            @default(0)
-  is_active    Boolean        @default(true)
-  created_at   DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime?      @updatedAt @db.Timestamptz(6)
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String    @unique @db.VarChar(50) // e.g. "rose", "crown"
+  display_name String    @db.VarChar(100) // e.g. "Rose 🌹"
+  icon_url     String?   @db.VarChar(500)
+  coin_value   Int // cost in coins per unit
+  sort_order   Int       @default(0)
+  is_active    Boolean   @default(true)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
 
-  gifts        stream_gifts[]
+  gifts stream_gifts[]
 
   @@index([is_active, sort_order])
 }
 
 model live_streams {
-  stream_id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fandom_id         String         @db.Uuid
-  host_user_id      String         @db.Uuid
-  title             String         @db.VarChar(200)
-  description       String?        @db.Text
-  thumbnail_url     String?        @db.VarChar(500)
+  stream_id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fandom_id     String? @db.Uuid
+  host_user_id  String  @db.Uuid
+  title         String  @db.VarChar(200)
+  description   String? @db.Text
+  thumbnail_url String? @db.VarChar(500)
 
   // SRS/RTMP
-  stream_key        String         @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @db.VarChar(200)
-  rtmp_url          String?        @db.VarChar(500)  // rtmp://srs-host/live/{stream_key}
-  hls_url           String?        @db.VarChar(500)  // http://srs-host/live/{stream_key}.m3u8
+  stream_key String  @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @db.VarChar(200)
+  rtmp_url   String? @db.VarChar(500) // rtmp://rtmp.fanclwb.site/live/{stream_key}
+  hls_url    String? @db.VarChar(500) // https://stream.fanclwb.site/live/{stream_key}.m3u8
+  replay_url String? @db.VarChar(500) // https://stream.fanclwb.site/recordings/{stream_key}.mp4
 
-  status            StreamStatus   @default(scheduled)
-  viewer_count      Int            @default(0)
-  peak_viewer_count Int            @default(0)
-  total_gifts_coins Int            @default(0)
+  status            StreamStatus @default(scheduled)
+  is_portrait       Boolean      @default(false)
+  is_ingesting      Boolean      @default(false)
+  viewer_count      Int          @default(0)
+  peak_viewer_count Int          @default(0)
+  total_gifts_coins Int          @default(0)
 
-  scheduled_at      DateTime?      @db.Timestamptz(6)
-  started_at        DateTime?      @db.Timestamptz(6)
-  ended_at          DateTime?      @db.Timestamptz(6)
-  created_at        DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime?      @updatedAt @db.Timestamptz(6)
+  scheduled_at DateTime? @db.Timestamptz(6)
+  started_at   DateTime? @db.Timestamptz(6)
+  ended_at     DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
 
-  fandom            fandoms        @relation(fields: [fandom_id], references: [fandom_id])
-  host              users          @relation("StreamHost", fields: [host_user_id], references: [user_id])
-  viewers           stream_viewers[]
-  messages          stream_messages[]
-  gifts             stream_gifts[]
+  fandom   fandoms?          @relation(fields: [fandom_id], references: [fandom_id])
+  host     users             @relation("StreamHost", fields: [host_user_id], references: [user_id])
+  viewers  stream_viewers[]
+  messages stream_messages[]
+  gifts    stream_gifts[]
 
   @@index([fandom_id, status])
   @@index([host_user_id])
@@ -523,56 +548,98 @@ model live_streams {
 }
 
 model stream_viewers {
-  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  stream_id String       @db.Uuid
-  user_id   String       @db.Uuid
-  joined_at DateTime     @default(now()) @db.Timestamptz(6)
-  left_at   DateTime?    @db.Timestamptz(6)
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stream_id String    @db.Uuid
+  user_id   String    @db.Uuid
+  joined_at DateTime  @default(now()) @db.Timestamptz(6)
+  left_at   DateTime? @db.Timestamptz(6)
 
-  stream    live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
-  user      users        @relation(fields: [user_id], references: [user_id])
+  stream live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
+  user   users        @relation(fields: [user_id], references: [user_id])
 
   @@unique([stream_id, user_id])
   @@index([stream_id])
 }
 
 model stream_messages {
-  message_id String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  stream_id  String       @db.Uuid
-  user_id    String       @db.Uuid
-  content    String       @db.Text
-  is_deleted Boolean      @default(false)
-  created_at DateTime     @default(now()) @db.Timestamptz(6)
+  message_id String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stream_id  String   @db.Uuid
+  user_id    String   @db.Uuid
+  content    String   @db.Text
+  is_deleted Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
 
-  stream     live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
-  user       users        @relation(fields: [user_id], references: [user_id])
+  stream live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
+  user   users        @relation(fields: [user_id], references: [user_id])
 
   @@index([stream_id, created_at])
   @@index([user_id])
 }
 
 model stream_gifts {
-  gift_id      String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  stream_id    String       @db.Uuid
-  sender_id    String       @db.Uuid
-  gift_type_id String       @db.Uuid
-  quantity     Int          @default(1)
-  total_coins  Int          // coin_value * quantity
-  created_at   DateTime     @default(now()) @db.Timestamptz(6)
+  gift_id      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stream_id    String   @db.Uuid
+  sender_id    String   @db.Uuid
+  gift_type_id String   @db.Uuid
+  quantity     Int      @default(1)
+  total_coins  Int // coin_value * quantity
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
 
-  stream       live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
-  sender       users        @relation("GiftSender", fields: [sender_id], references: [user_id])
-  gift_type    gift_types   @relation(fields: [gift_type_id], references: [id])
+  stream    live_streams @relation(fields: [stream_id], references: [stream_id], onDelete: Cascade)
+  sender    users        @relation("GiftSender", fields: [sender_id], references: [user_id])
+  gift_type gift_types   @relation(fields: [gift_type_id], references: [id])
 
   @@index([stream_id, created_at])
   @@index([sender_id])
 }
 
 // =============================================
+// FAN PROJECTS
+// =============================================
+model fan_projects {
+  project_id     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fandom_id      String        @db.Uuid
+  creator_id     String        @db.Uuid
+  title          String        @db.VarChar(200)
+  description    String?       @db.Text
+  image_url      String?       @db.VarChar(500)
+  target_amount  Int
+  current_amount Int           @default(0)
+  status         ProjectStatus @default(active)
+  start_date     DateTime      @default(now()) @db.Timestamptz(6)
+  end_date       DateTime      @db.Timestamptz(6)
+  tiers          Json? // Array of { amount: number, description: string }
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?     @updatedAt @db.Timestamptz(6)
+
+  fandom    fandoms                 @relation(fields: [fandom_id], references: [fandom_id], onDelete: Cascade)
+  creator   users                   @relation(fields: [creator_id], references: [user_id])
+  donations fan_project_donations[]
+
+  @@index([fandom_id])
+  @@index([status])
+}
+
+model fan_project_donations {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id String   @db.Uuid
+  user_id    String   @db.Uuid
+  amount     Int
+  message    String?  @db.VarChar(200)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  project fan_projects @relation(fields: [project_id], references: [project_id], onDelete: Cascade)
+  user    users        @relation(fields: [user_id], references: [user_id])
+
+  @@index([project_id])
+  @@index([user_id])
+}
+
+// =============================================
 // ENUMS
 // =============================================
 enum ArtistAccountType {
-  group    
+  group
   solo
 }
 
@@ -589,8 +656,8 @@ enum UserRole {
 }
 
 enum PostAsType {
-  user      
-  artist    
+  user
+  artist
   member
 }
 
@@ -601,11 +668,6 @@ enum ReactionType {
 enum VoteType {
   upvote
   downvote
-}
-
-enum IdentityProvider {
-  google
-  email
 }
 
 enum AuthProvider {
@@ -632,5 +694,17 @@ enum StreamStatus {
   scheduled
   live
   ended
+  cancelled
+}
+
+enum FandomStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ProjectStatus {
+  active
+  completed
   cancelled
 }

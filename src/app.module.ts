@@ -15,7 +15,9 @@ import { OmiseService } from './omise/omise.service';
 import { OmiseModule } from './omise/omise.module';
 import { ArtistModule } from './artist/artist.module';
 import { PostsController } from './community/controllers/posts.controller';
+import { CommentsController } from './community/controllers/comments.controller';
 import { PostsService } from './community/services/posts.service';
+import { CommentsService } from './community/services/comments.service';
 import { FandomController } from './fandom/fandom.controller';
 import { FandomService } from './fandom/fandom.service';
 import { ModuleService } from './module/module.service';
@@ -23,6 +25,8 @@ import { ArtistAccountController } from './artist-account/artist-account.control
 import { ArtistAccountService } from './artist-account/artist-account.service';
 import { ArtistAccountModule } from './artist-account/artist-account.module';
 import { LiveStreamModule } from './live-stream/live-stream.module';
+import { StorageModule } from './storage/storage.module';
+import { FanProjectModule } from './fan-project/fan-project.module';
 
 @Module({
   imports: [
@@ -37,11 +41,14 @@ import { LiveStreamModule } from './live-stream/live-stream.module';
     ArtistModule,
     ArtistAccountModule,
     LiveStreamModule,
+    StorageModule,
+    FanProjectModule,
   ],
   controllers: [
     AppController,
     CoinController,
     PostsController,
+    CommentsController,
     FandomController,
     ArtistAccountController,
   ],
@@ -52,6 +59,7 @@ import { LiveStreamModule } from './live-stream/live-stream.module';
     CoinService,
     OmiseService,
     PostsService,
+    CommentsService,
     FandomService,
     ModuleService,
     ArtistAccountService,

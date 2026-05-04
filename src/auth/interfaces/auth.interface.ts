@@ -3,6 +3,7 @@ import { type Request } from 'express';
 
 export interface JwtPayload {
   user_id: string;
+  userId: string; // for backward compatibility
   email: string | null;
   role: UserRole;
 }

@@ -37,10 +37,48 @@ export class FandomController {
     return this.fandomService.create(dto);
   }
 
+  // ─── USER: ขอสร้าง fandom ───────────────────────────
+  @Post('request')
+  @UseGuards(JwtAuthGuard)
+  requestFandom(
+    @Body() dto: CreateFandomDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.fandomService.create(dto, req.user.user_id);
+  }
+
+  // ─── ADMIN: ดูรายการขอสร้าง fandom ──────────────────
+  @Get('pending')
+  @UseGuards(JwtAuthGuard)
+  getPending() {
+    return this.fandomService.getPending();
+  }
+
+  // ─── ADMIN: อนุมัติ fandom ───────────────────────────
+  @Post(':fandomId/approve')
+  @UseGuards(JwtAuthGuard)
+  approve(@Param('fandomId', ParseUUIDPipe) fandomId: string) {
+    return this.fandomService.approve(fandomId);
+  }
+
+  // ─── ADMIN: ปฏิเสธ fandom ───────────────────────────
+  @Post(':fandomId/reject')
+  @UseGuards(JwtAuthGuard)
+  reject(@Param('fandomId', ParseUUIDPipe) fandomId: string) {
+    return this.fandomService.reject(fandomId);
+  }
+
   // ─── PUBLIC: ดู fandom ทั้งหมด ────────────────────────
   @Get()
   findAll(@Query() query: PaginationQueryDto) {
     return this.fandomService.findAll(query);
+  }
+
+  // ─── USER: ดูแฟนด้อมที่ฉันเป็นสมาชิก ──────────────────────
+  @Get('me/following')
+  @UseGuards(JwtAuthGuard)
+  getMyFandoms(@Req() req: AuthenticatedRequest) {
+    return this.fandomService.getMyFandoms(req.user.user_id);
   }
 
   // ─── PUBLIC: ดู fandom by slug ────────────────────────
@@ -50,15 +88,17 @@ export class FandomController {
     return this.fandomService.findBySlug(slug, req.user?.user_id);
   }
 
-  // ─── ADMIN: แก้ไข fandom ──────────────────────────────
+  // ─── ADMIN/FANDOM ADMIN: แก้ไข fandom ───────────────
   @Patch(':fandomId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @UseGuards(JwtAuthGuard)
   update(
     @Param('fandomId', ParseUUIDPipe) fandomId: string,
     @Body() dto: UpdateFandomDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.fandomService.update(fandomId, dto);
+    // ถ้าไม่ใช่ system admin ให้เช็คว่าเป็น fandom admin
+    const actorUserId = req.user.role === 'admin' ? undefined : req.user.user_id;
+    return this.fandomService.update(fandomId, dto, actorUserId);
   }
 
   // ─── USER: เข้าร่วม fandom ────────────────────────────

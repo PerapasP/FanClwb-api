@@ -47,17 +47,19 @@ export class LiveStreamGateway
   async handleConnection(client: AuthSocket) {
     try {
       const token = this.extractToken(client);
+
       if (!token) {
-        client.disconnect();
+        this.logger.warn(`No token provided, assigning guest ID: ${client.id}`);
+        client.data.userId = `guest-${client.id}`;
         return;
       }
 
       const payload = this.jwtService.verify<{ sub: string }>(token);
       client.data.userId = payload.sub;
       this.logger.log(`Client connected: ${client.id} (user: ${payload.sub})`);
-    } catch {
-      this.logger.warn(`Unauthorized connection attempt: ${client.id}`);
-      client.disconnect();
+    } catch (err) {
+      this.logger.warn(`Auth failed, assigning guest ID: ${client.id}. Error: ${err.message}`);
+      client.data.userId = `guest-${client.id}`;
     }
   }
 
@@ -99,8 +101,22 @@ export class LiveStreamGateway
       const viewerCount = await this.liveStreamService.joinStream(streamId, userId);
       client.data.currentStreamId = streamId;
 
+      this.logger.log(`User ${userId} joining stream room: stream:${streamId}`);
       await client.join(`stream:${streamId}`);
       this.broadcastViewerCount(streamId, viewerCount);
+
+      // Check if stream is already ingesting/started from database
+      const stream = await this.liveStreamService.getStream(streamId);
+      this.logger.log(`Checking ingestion for ${streamId}: ${stream?.is_ingesting}`);
+      
+      if (stream?.is_ingesting) {
+        this.logger.log(`Notifying joiner ${client.id} that stream ${streamId} is already ingesting`);
+        client.emit('stream-started', {
+          streamId,
+          status: 'live',
+          hls_url: stream.hls_url,
+        });
+      }
 
       return { event: 'joined', data: { streamId, viewerCount } };
     } catch (err: unknown) {
@@ -175,6 +191,7 @@ export class LiveStreamGateway
   // ──────────────────────────────────────────────────────────
 
   broadcastStreamStarted(streamId: string, hlsUrl: string | null) {
+    this.logger.log(`Broadcasting stream-started for streamId: ${streamId}`);
     this.server.to(`stream:${streamId}`).emit('stream-started', {
       streamId,
       status: 'live',
@@ -243,6 +260,20 @@ export class LiveStreamGateway
     // Try query param
     const queryToken = client.handshake.query?.token as string | undefined;
     if (queryToken) return queryToken;
+
+    // Try Cookie header (For HttpOnly cookies)
+    const cookieHeader = client.handshake.headers?.cookie;
+    if (cookieHeader) {
+      // Parse cookies more robustly
+      const cookies = cookieHeader.split(';').reduce((acc, curr) => {
+        const [key, value] = curr.split('=');
+        if (key && value) acc[key.trim()] = value.trim();
+        return acc;
+      }, {});
+      
+      const token = cookies['access_token'] || cookies['token'] || cookies['jwt'];
+      if (token) return token;
+    }
 
     return null;
   }

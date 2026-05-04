@@ -5,12 +5,14 @@ import {
   IsUUID,
   MaxLength,
   IsDateString,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateStreamDto {
-  @ApiProperty({ description: 'Fandom ID this stream belongs to' })
+  @ApiPropertyOptional({ description: 'Fandom ID this stream belongs to. Optional if streaming via Artist/Member account.' })
+  @IsOptional()
   @IsUUID()
-  fandom_id: string;
+  fandom_id?: string;
 
   @ApiProperty({ description: 'Stream title', maxLength: 200 })
   @IsString()
@@ -27,6 +29,11 @@ export class CreateStreamDto {
   @IsString()
   @MaxLength(500)
   thumbnail_url?: string;
+
+  @ApiPropertyOptional({ description: 'Whether the stream is in portrait orientation (TikTok style)' })
+  @IsOptional()
+  @IsBoolean()
+  is_portrait?: boolean;
 
   @ApiPropertyOptional({
     description: 'Scheduled start time (ISO 8601)',

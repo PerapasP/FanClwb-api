@@ -18,4 +18,8 @@ export class UpdateFandomDto {
   @IsOptional()
   @IsString()
   banner_url?: string;
+
+  @IsOptional()
+  @IsString()
+  rules?: string;
 }

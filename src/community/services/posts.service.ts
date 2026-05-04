@@ -27,6 +27,7 @@ export class PostsService {
           user_id: true,
           fullname: true,
           email: true,
+          image_url: true,
         },
       },
       images: {
@@ -39,18 +40,11 @@ export class PostsService {
           slug: true,
         },
       },
-      repost_of: {
-        include: {
-          user: {
-            select: {
-              user_id: true,
-              fullname: true,
-              email: true,
-            },
-          },
-          images: {
-            orderBy: { sort_order: 'asc' },
-          },
+      artist: {
+        select: {
+          artist_id: true,
+          name: true,
+          image_url: true,
         },
       },
       ...(userId
@@ -129,20 +123,31 @@ export class PostsService {
 
   // ─── CREATE POST ──────────────────────────────────────
   async create(userId: string, dto: CreatePostDto): Promise<PostWithRelations> {
-    // validate repost
-    if (dto.repost_of_id) {
-      const original = await this.prisma.posts.findUnique({
-        where: { post_id: dto.repost_of_id },
+    // validate fandom or artist follow
+    if (dto.fandom_id) {
+      // Find artist associated with this fandom
+      const fandom = await this.prisma.fandoms.findUnique({
+        where: { fandom_id: dto.fandom_id },
+        select: { artist_id: true }
       });
 
-      if (!original || original.is_deleted) {
-        throw new NotFoundException('Original post not found');
-      }
-    }
+      if (fandom) {
+        // Check if member or follower
+        const [membership, follower] = await Promise.all([
+          this.prisma.fandom_members.findUnique({
+            where: { fandom_id_user_id: { fandom_id: dto.fandom_id, user_id: userId } }
+          }),
+          fandom.artist_id
+            ? this.prisma.artist_followers.findUnique({
+                where: { artist_id_user_id: { artist_id: fandom.artist_id, user_id: userId } }
+              })
+            : Promise.resolve(null),
+        ]);
 
-    // validate fandom
-    if (dto.fandom_id) {
-      await this.validateFandomMembership(dto.fandom_id, userId);
+        if (!membership && !follower) {
+          throw new ForbiddenException('You must follow the artist or join the fandom to post');
+        }
+      }
     }
 
     // validate post as
@@ -154,11 +159,12 @@ export class PostsService {
       const created = await tx.posts.create({
         data: {
           user_id: userId,
-          content: dto.content ?? null,
-          repost_of_id: dto.repost_of_id ?? null,
+          content: dto.content,
           post_as_type: postAsType,
           post_as_id: dto.post_as_id ?? null,
           fandom_id: dto.fandom_id ?? null,
+          artist_id: dto.artist_id ?? null,
+          is_exclusive: dto.is_exclusive ?? false,
         },
       });
 
@@ -170,14 +176,6 @@ export class PostsService {
             image_url: url,
             sort_order: index,
           })),
-        });
-      }
-
-      // increment repost count
-      if (dto.repost_of_id) {
-        await tx.posts.update({
-          where: { post_id: dto.repost_of_id },
-          data: { repost_count: { increment: 1 } },
         });
       }
 
@@ -198,7 +196,10 @@ export class PostsService {
 
     const where: Prisma.postsWhereInput = {
       is_deleted: false,
-      fandom_id: null, // feed ทั่วไป ไม่ดึง fandom posts
+      OR: [
+        { post_as_type: 'artist' },
+        { fandom_id: { not: null } }
+      ]
     };
 
     const [posts, total] = await Promise.all([
@@ -252,6 +253,53 @@ export class PostsService {
         skip,
         take: limit,
         orderBy: [{ is_pinned: 'desc' }, { created_at: 'desc' }],
+        include: this.postInclude(userId),
+      }),
+      this.prisma.posts.count({ where }),
+    ]);
+
+    return {
+      data: posts.map((post) => this.mapPost(post, userId)),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  // ─── FIND ARTIST FEED ────────────────────────────────
+  async findByArtist(
+    artistId: string,
+    query: PaginationQueryDto,
+    userId?: string,
+  ): Promise<PaginatedResult<PostWithRelations>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    // Fetch posts associated with this artist (either directly or via their fandom)
+    const fandom = await this.prisma.fandoms.findUnique({
+      where: { artist_id: artistId },
+      select: { fandom_id: true }
+    });
+
+    const where: Prisma.postsWhereInput = {
+      OR: [
+        { artist_id: artistId },
+        { post_as_type: 'artist', post_as_id: artistId },
+        ...(fandom ? [{ fandom_id: fandom.fandom_id }] : [])
+      ],
+      is_deleted: false,
+    };
+
+    const [posts, total] = await Promise.all([
+      this.prisma.posts.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
         include: this.postInclude(userId),
       }),
       this.prisma.posts.count({ where }),

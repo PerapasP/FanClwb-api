@@ -12,12 +12,14 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
   ApiParam,
+  ApiExcludeEndpoint,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { LiveStreamService } from './live-stream.service';
@@ -26,6 +28,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateStreamDto } from './dto/create-stream.dto';
 import { UpdateStreamDto } from './dto/update-stream.dto';
 import { SendGiftDto } from './dto/send-gift.dto';
+import { SrsCallbackDto, ReplayReadyDto } from './dto/srs-hook.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 type AuthRequest = Request & { user: { userId: string } };
@@ -33,6 +36,8 @@ type AuthRequest = Request & { user: { userId: string } };
 @ApiTags('Live Streams')
 @Controller('live-streams')
 export class LiveStreamController {
+  private readonly logger = new Logger(LiveStreamController.name);
+
   constructor(
     private readonly liveStreamService: LiveStreamService,
     private readonly liveStreamGateway: LiveStreamGateway,
@@ -53,9 +58,17 @@ export class LiveStreamController {
   // ──────────────────────────────────────────────────────────
 
   @Get()
-  @ApiOperation({ summary: 'List all live and scheduled streams' })
+  @ApiOperation({ summary: 'List only live streams for the public community' })
   listStreams(@Query() query: PaginationQueryDto) {
     return this.liveStreamService.listStreams(query);
+  }
+
+  @Get('my-streams')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List my own streams (Artist only, includes scheduled)' })
+  listMyStreams(@Req() req: AuthRequest, @Query() query: PaginationQueryDto) {
+    return this.liveStreamService.listMyStreams(req.user.userId, query);
   }
 
   @Get('fandom/:fandomId')
@@ -195,10 +208,90 @@ export class LiveStreamController {
     return gift;
   }
 
+  @Get(':streamId/gifts')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get gift history for a stream' })
+  @ApiParam({ name: 'streamId', description: 'Stream UUID' })
+  getGifts(
+    @Param('streamId', ParseUUIDPipe) streamId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.liveStreamService.getGifts(streamId, query);
+  }
+
   @Get(':streamId/gifts/leaderboard')
   @ApiOperation({ summary: 'Get top gift senders for a stream' })
   @ApiParam({ name: 'streamId', description: 'Stream UUID' })
   getGiftLeaderboard(@Param('streamId', ParseUUIDPipe) streamId: string) {
     return this.liveStreamService.getGiftLeaderboard(streamId);
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // SRS Webhooks — called by SRS media server (no JWT)
+  // ──────────────────────────────────────────────────────────
+
+  @Post('hooks/on-publish')
+  @HttpCode(HttpStatus.OK)
+  @ApiExcludeEndpoint()
+  async onPublish(@Body() dto: SrsCallbackDto) {
+    this.logger.log(`SRS on_publish: stream=${dto.stream} ip=${dto.ip}`);
+    const result = await this.liveStreamService.handlePublish(dto.stream, dto.ip);
+
+    // If stream went live, broadcast via WebSocket
+    if (result.code === 0) {
+      const stream = await this.liveStreamService.getStreamByKey(dto.stream);
+      if (stream) {
+        this.liveStreamGateway.broadcastStreamStarted(
+          stream.stream_id,
+          stream.hls_url,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  @Post('hooks/on-unpublish')
+  @HttpCode(HttpStatus.OK)
+  @ApiExcludeEndpoint()
+  async onUnpublish(@Body() dto: SrsCallbackDto) {
+    this.logger.log(`SRS on_unpublish: stream=${dto.stream}`);
+    const result = await this.liveStreamService.handleUnpublish(dto.stream);
+
+    // Broadcast stream ended via WebSocket
+    if (result.stream_id) {
+      this.liveStreamGateway.broadcastStreamEnded(result.stream_id);
+    }
+
+    return result;
+  }
+
+  @Post('hooks/replay-ready')
+  @HttpCode(HttpStatus.OK)
+  @ApiExcludeEndpoint()
+  async onReplayReady(@Body() dto: ReplayReadyDto) {
+    this.logger.log(`Replay ready: key=${dto.stream_key} url=${dto.replay_url}`);
+    return this.liveStreamService.setReplayUrl(dto.stream_key, dto.replay_url);
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Replays — public VOD listing
+  // ──────────────────────────────────────────────────────────
+
+  @Get('replays')
+  @ApiOperation({ summary: 'List all available stream replays (VOD)' })
+  listReplays(@Query() query: PaginationQueryDto) {
+    return this.liveStreamService.listReplays(query);
+  }
+
+  @Get('replays/fandom/:fandomId')
+  @ApiOperation({ summary: 'List replays for a specific fandom' })
+  @ApiParam({ name: 'fandomId', description: 'Fandom UUID' })
+  listFandomReplays(
+    @Param('fandomId', ParseUUIDPipe) fandomId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.liveStreamService.listFandomReplays(fandomId, query);
   }
 }

@@ -62,17 +62,6 @@ export class CommentsService {
       depth = parent.depth + 1;
     }
 
-    // เช็ค repost comment
-    if (dto.repost_of_id) {
-      const original = await this.prisma.post_comments.findUnique({
-        where: { comment_id: dto.repost_of_id },
-      });
-
-      if (!original || original.is_deleted) {
-        throw new NotFoundException('Original comment not found');
-      }
-    }
-
     const comment = await this.prisma.$transaction(async (tx) => {
       const created = await tx.post_comments.create({
         data: {
@@ -80,7 +69,6 @@ export class CommentsService {
           user_id: userId,
           content: dto.content ?? null,
           parent_id: dto.parent_id ?? null,
-          repost_of_id: dto.repost_of_id ?? null,
           depth,
         },
       });
@@ -107,14 +95,6 @@ export class CommentsService {
         await tx.post_comments.update({
           where: { comment_id: dto.parent_id },
           data: { reply_count: { increment: 1 } },
-        });
-      }
-
-      // อัปเดต repost_count
-      if (dto.repost_of_id) {
-        await tx.post_comments.update({
-          where: { comment_id: dto.repost_of_id },
-          data: { repost_count: { increment: 1 } },
         });
       }
 

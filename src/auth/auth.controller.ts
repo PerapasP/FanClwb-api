@@ -18,6 +18,7 @@ import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { clearAuthCookies, setAuthCookies } from '../common/utils/cookie.util';
 import { SignInDto, SignUpDto } from './dto/auth.dto';
+import * as authInterface from './interfaces/auth.interface';
 
 @Controller('auth')
 export class AuthController {
@@ -94,7 +95,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  async getMe(@Req() req: Request & { user: { userId: string } }) {
-    return this.authService.getMe(req.user.userId);
+  async getMe(@Req() req: authInterface.AuthenticatedRequest) {
+    return this.authService.getMe(req.user.user_id);
   }
 }

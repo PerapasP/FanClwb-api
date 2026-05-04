@@ -15,21 +15,23 @@ export class FandomService {
   constructor(private readonly prisma: PrismaService) {}
 
   // ─── CREATE FANDOM (admin only) ──────────────────────
-  async create(dto: CreateFandomDto) {
-    const artist = await this.prisma.artists.findUnique({
-      where: { artist_id: dto.artist_id },
-    });
+  async create(dto: CreateFandomDto, creatorId?: string) {
+    if (dto.artist_id) {
+      const artist = await this.prisma.artists.findUnique({
+        where: { artist_id: dto.artist_id },
+      });
 
-    if (!artist) {
-      throw new NotFoundException('Artist not found');
-    }
+      if (!artist) {
+        throw new NotFoundException('Artist not found');
+      }
 
-    const existing = await this.prisma.fandoms.findUnique({
-      where: { artist_id: dto.artist_id },
-    });
+      const existing = await this.prisma.fandoms.findUnique({
+        where: { artist_id: dto.artist_id },
+      });
 
-    if (existing) {
-      throw new ConflictException('Fandom already exists for this artist');
+      if (existing) {
+        throw new ConflictException('Fandom already exists for this artist');
+      }
     }
 
     return this.prisma.fandoms.create({
@@ -40,6 +42,9 @@ export class FandomService {
         description: dto.description,
         image_url: dto.image_url,
         banner_url: dto.banner_url,
+        creator_id: creatorId,
+        status: creatorId ? 'pending' : 'approved',
+        is_active: creatorId ? false : true,
       },
       include: {
         artist: {
@@ -49,13 +54,72 @@ export class FandomService {
     });
   }
 
+  // ─── GET PENDING FANDOMS (system admin) ─────────────
+  async getPending() {
+    return this.prisma.fandoms.findMany({
+      where: { status: 'pending' },
+      include: {
+        creator: {
+          select: { user_id: true, fullname: true, email: true, image_url: true },
+        },
+        artist: {
+          select: { artist_id: true, name: true, image_url: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  // ─── APPROVE FANDOM ─────────────────────────────────
+  async approve(fandomId: string) {
+    const fandom = await this.prisma.fandoms.findUnique({
+      where: { fandom_id: fandomId },
+    });
+
+    if (!fandom) throw new NotFoundException('Fandom not found');
+
+    return await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.fandoms.update({
+        where: { fandom_id: fandomId },
+        data: { status: 'approved', is_active: true },
+      });
+
+      if (fandom.creator_id) {
+        await tx.fandom_members.upsert({
+          where: {
+            fandom_id_user_id: {
+              fandom_id: fandomId,
+              user_id: fandom.creator_id,
+            },
+          },
+          update: { role: 'admin' },
+          create: {
+            fandom_id: fandomId,
+            user_id: fandom.creator_id,
+            role: 'admin',
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  // ─── REJECT FANDOM ─────────────────────────────────
+  async reject(fandomId: string) {
+    return this.prisma.fandoms.update({
+      where: { fandom_id: fandomId },
+      data: { status: 'rejected', is_active: false },
+    });
+  }
+
   // ─── GET ALL FANDOMS ─────────────────────────────────
   async findAll(query: PaginationQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
-    const where = { is_active: true };
+    const where = { is_active: true, status: 'approved' as any };
 
     const [fandoms, total] = await Promise.all([
       this.prisma.fandoms.findMany({
@@ -121,13 +185,26 @@ export class FandomService {
   }
 
   // ─── UPDATE FANDOM ───────────────────────────────────
-  async update(fandomId: string, dto: UpdateFandomDto) {
+  async update(fandomId: string, dto: UpdateFandomDto, actorUserId?: string) {
     const fandom = await this.prisma.fandoms.findUnique({
       where: { fandom_id: fandomId },
     });
 
     if (!fandom) {
       throw new NotFoundException('Fandom not found');
+    }
+
+    // หากมี actorUserId ให้เช็คว่าเป็น admin ของ fandom หรือไม่
+    if (actorUserId) {
+      const actor = await this.prisma.fandom_members.findUnique({
+        where: {
+          fandom_id_user_id: { fandom_id: fandomId, user_id: actorUserId },
+        },
+      });
+
+      if (!actor || actor.role !== 'admin') {
+        throw new ForbiddenException('Only fandom admins can update settings');
+      }
     }
 
     return this.prisma.fandoms.update({
@@ -305,5 +382,22 @@ export class FandomService {
     });
 
     return { message: 'Member kicked successfully' };
+  }
+
+  // ─── GET MY FANDOMS ───────────────────────────────────
+  async getMyFandoms(userId: string) {
+    return this.prisma.fandom_members.findMany({
+      where: { user_id: userId },
+      include: {
+        fandom: {
+          include: {
+            artist: {
+              select: { artist_id: true, name: true, slug: true, image_url: true },
+            },
+          },
+        },
+      },
+      orderBy: { joined_at: 'desc' },
+    });
   }
 }

@@ -7,9 +7,9 @@ import {
 } from 'class-validator';
 
 export class CreateFandomDto {
+  @IsOptional()
   @IsUUID()
-  @IsNotEmpty()
-  artist_id!: string;
+  artist_id?: string;
 
   @IsString()
   @IsNotEmpty()

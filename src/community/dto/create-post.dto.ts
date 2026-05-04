@@ -1,21 +1,20 @@
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
-  ValidateIf,
 } from 'class-validator';
 import { type PostAsType } from '@prisma/client';
 
 export class CreatePostDto {
-  @ValidateIf((o: CreatePostDto) => !o.repost_of_id)
-  @IsNotEmpty({ message: 'Content is required when not reposting' })
+  @IsNotEmpty({ message: 'Content is required' })
   @IsString()
-  @MaxLength(5000)
-  content?: string;
+  @MaxLength(10000)
+  content: string;
 
   @IsOptional()
   @IsArray()
@@ -23,9 +22,6 @@ export class CreatePostDto {
   image_urls?: string[];
 
   @IsOptional()
-  @IsUUID()
-  repost_of_id?: string;
-
   @IsOptional()
   @IsIn(['user', 'artist', 'member'])
   post_as_type?: PostAsType;
@@ -37,4 +33,12 @@ export class CreatePostDto {
   @IsOptional()
   @IsUUID()
   fandom_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  artist_id?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_exclusive?: boolean;
 }

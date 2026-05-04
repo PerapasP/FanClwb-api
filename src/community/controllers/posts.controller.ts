@@ -48,6 +48,16 @@ export class PostsController {
     return this.postsService.findByFandom(fandomId, query, req.user?.user_id);
   }
 
+  @Get('artist/:artistId')
+  @UseGuards(OptionalJwtAuthGuard)
+  findByArtist(
+    @Param('artistId', ParseUUIDPipe) artistId: string,
+    @Query() query: PaginationQueryDto,
+    @Req() req: OptionalAuthRequest,
+  ) {
+    return this.postsService.findByArtist(artistId, query, req.user?.user_id);
+  }
+
   @Get('user/:userId')
   @UseGuards(OptionalJwtAuthGuard)
   findByUser(

@@ -12,8 +12,8 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { SignInDto, SignUpDto } from './dto/auth.dto';
 
-import { users } from '@prisma/client';
-import { AuthResponse } from './types/auth.types';
+import { UserRole, users } from '@prisma/client';
+import { AccessTokenPayload, AuthResponse } from './types/auth.types';
 
 @Injectable()
 export class AuthService {
@@ -37,14 +37,22 @@ export class AuthService {
   }
 
   async signUpWithEmail(dto: SignUpDto) {
-    const existingIdentity = await this.prisma.user_identities.findFirst({
-      where: {
-        provider: 'email',
-        email: dto.email,
-      },
+    const existingUser = await this.prisma.users.findUnique({
+      where: { email: dto.email },
+      include: { identities: true },
     });
-    if (existingIdentity)
+
+    if (existingUser) {
+      const hasGoogle = existingUser.identities.some(
+        (id) => id.provider === 'google',
+      );
+      if (hasGoogle) {
+        throw new BadRequestException(
+          'อีเมลนี้ถูกใช้งานแล้วด้วยบัญชี Google กรุณาเข้าสู่ระบบด้วย Google',
+        );
+      }
       throw new BadRequestException('อีเมลนี้ถูกใช้งานแล้ว');
+    }
 
     const hashedPassword = await bcrypt.hash(dto.password, this.SALT_ROUNDS);
 
@@ -97,7 +105,8 @@ export class AuthService {
     if (!isGoogleProvider)
       throw new UnauthorizedException('Not a Google login');
 
-    const identity = await this.prisma.user_identities.findUnique({
+    // 1. Try to find identity by provider + social_id
+    let identity = await this.prisma.user_identities.findUnique({
       where: {
         provider_social_id: {
           provider: 'google',
@@ -107,25 +116,68 @@ export class AuthService {
       include: { user: true },
     });
 
-    let userId: string;
-
-    if (!identity) {
-      const newUser = await this.prisma.users.create({
-        data: {
-          email: decoded.email,
-          fullname: (decoded.name as string) || 'Google User',
-          identities: {
-            create: {
-              provider: 'google',
-              social_id: decoded.uid,
-              email: decoded.email,
-            },
+    // 2. If not found, try to find identity by provider + email
+    if (!identity && decoded.email) {
+      identity = await this.prisma.user_identities.findUnique({
+        where: {
+          provider_email: {
+            provider: 'google',
+            email: decoded.email,
           },
         },
+        include: { user: true },
       });
-      userId = newUser.user_id;
-    } else {
+
+      if (identity) {
+        // Update social_id if it's different (e.g. first time getting UID from Firebase)
+        if (identity.social_id !== decoded.uid) {
+          await this.prisma.user_identities.update({
+            where: { id: identity.id },
+            data: { social_id: decoded.uid },
+          });
+        }
+      }
+    }
+
+    let userId: string;
+
+    if (identity) {
       userId = identity.user_id;
+    } else {
+      // 3. No identity found, check if a user with this email exists to link account
+      const existingUser = decoded.email
+        ? await this.prisma.users.findUnique({
+            where: { email: decoded.email },
+          })
+        : null;
+
+      if (existingUser) {
+        await this.prisma.user_identities.create({
+          data: {
+            provider: 'google',
+            social_id: decoded.uid,
+            email: decoded.email,
+            user_id: existingUser.user_id,
+          },
+        });
+        userId = existingUser.user_id;
+      } else {
+        // Create new user and identity
+        const newUser = await this.prisma.users.create({
+          data: {
+            email: decoded.email,
+            fullname: (decoded.name as string) || 'Google User',
+            identities: {
+              create: {
+                provider: 'google',
+                social_id: decoded.uid,
+                email: decoded.email,
+              },
+            },
+          },
+        });
+        userId = newUser.user_id;
+      }
     }
 
     return this.generateAuthResponse(userId);
@@ -177,7 +229,11 @@ export class AuthService {
         },
       });
 
-      const accessToken = this.signAccessToken(user.user_id);
+      const accessToken = this.signAccessToken(
+        user.user_id,
+        user.email,
+        user.role,
+      );
       const refreshToken = this.signRefreshToken(user.user_id);
 
       return { accessToken, refreshToken };
@@ -231,7 +287,15 @@ export class AuthService {
       },
     });
 
-    const accessToken = this.signAccessToken(userId);
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const accessToken = this.signAccessToken(userId, user.email, user.role);
 
     return {
       accessToken,
@@ -242,6 +306,7 @@ export class AuthService {
   async getMe(userId: string) {
     const user = await this.prisma.users.findUnique({
       where: { user_id: userId },
+      include: { artist_account: true }
     });
 
     if (!user) throw new UnauthorizedException('User not found');
@@ -252,6 +317,14 @@ export class AuthService {
     userId: string,
     userRecord?: users,
   ): Promise<AuthResponse> {
+    const user =
+      userRecord ||
+      (await this.prisma.users.findUnique({ where: { user_id: userId } }));
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
     const { full, tokenId, token } = this.generateRefreshToken();
     const hashedToken = await bcrypt.hash(token, this.SALT_ROUNDS);
 
@@ -264,12 +337,12 @@ export class AuthService {
       },
     });
 
-    const accessToken = this.signAccessToken(userId);
+    const accessToken = this.signAccessToken(userId, user.email, user.role);
 
     return {
       accessToken,
       refreshToken: full,
-      user: userRecord,
+      user,
     };
   }
 
@@ -280,14 +353,17 @@ export class AuthService {
     );
   }
 
-  private signAccessToken(userId: string) {
-    return this.jwt.sign(
-      { sub: userId, type: 'access' },
-      {
-        secret: process.env.JWT_ACCESS_SECRET,
-        expiresIn: '15m',
-      },
-    );
+  private signAccessToken(userId: string, email: string | null, role: UserRole) {
+    const payload: AccessTokenPayload = {
+      sub: userId,
+      email,
+      role,
+      type: 'access',
+    };
+    return this.jwt.sign(payload, {
+      secret: process.env.JWT_ACCESS_SECRET,
+      expiresIn: '15m',
+    });
   }
 
   private signRefreshToken(userId: string) {

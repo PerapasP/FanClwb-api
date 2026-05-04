@@ -60,3 +60,7 @@ package-lock.json
 /src/generated/prisma
 
 .vscode/
+
+/secrets/*.json
+
+.env.migrate
