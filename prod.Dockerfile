@@ -10,7 +10,7 @@ COPY prisma ./prisma/
 RUN yarn install --frozen-lockfile
 
 # Stage 2: Build the application
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -27,8 +27,8 @@ RUN apk add --no-cache openssl
 WORKDIR /app
 
 ENV NODE_ENV production
-# Cloud Run listens on 8080 by default, but NestJS will use the PORT env var
-ENV PORT 8080
+# Use port 5599 as defined in .env
+ENV PORT 5599
 
 # Create a non-privileged user
 RUN addgroup --system --gid 1001 nodejs
@@ -42,7 +42,7 @@ COPY --from=builder /app/prisma ./prisma
 
 USER nestjs
 
-EXPOSE 8080
+EXPOSE 5599
 
 # Start the application
-CMD ["node", "dist/main"]
+CMD ["node", "dist/main.js"]
