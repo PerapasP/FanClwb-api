@@ -107,8 +107,21 @@ export class ArtistService {
       isFollowing = !!follow;
     }
 
+    let members = artist.members as any[];
+    if (userId) {
+      members = await Promise.all(
+        artist.members.map(async (m) => {
+          const mFollow = await this.prisma.member_followers.findFirst({
+            where: { member_id: m.member_id, user_id: userId },
+          });
+          return { ...m, isFollowing: !!mFollow };
+        }),
+      );
+    }
+
     return {
       ...artist,
+      members,
       isFollowing,
     };
   }
@@ -153,8 +166,21 @@ export class ArtistService {
       isFollowing = !!follow;
     }
 
+    let members = artist.members as any[];
+    if (userId) {
+      members = await Promise.all(
+        artist.members.map(async (m) => {
+          const mFollow = await this.prisma.member_followers.findFirst({
+            where: { member_id: m.member_id, user_id: userId },
+          });
+          return { ...m, isFollowing: !!mFollow };
+        }),
+      );
+    }
+
     return {
       ...artist,
+      members,
       isFollowing,
     };
   }
@@ -183,7 +209,7 @@ export class ArtistService {
     });
   }
 
-  async findMember(artistId: string, memberId: string) {
+  async findMember(artistId: string, memberId: string, userId?: string) {
     const member = await this.prisma.artist_members.findFirst({
       where: {
         member_id: memberId,
@@ -204,10 +230,24 @@ export class ArtistService {
       throw new NotFoundException('Member not found');
     }
 
-    return member;
+    let isFollowing = false;
+    if (userId) {
+      const follow = await this.prisma.member_followers.findFirst({
+        where: {
+          member_id: member.member_id,
+          user_id: userId,
+        },
+      });
+      isFollowing = !!follow;
+    }
+
+    return {
+      ...member,
+      isFollowing,
+    };
   }
 
-  async findMemberById(memberId: string) {
+  async findMemberById(memberId: string, userId?: string) {
     const member = await this.prisma.artist_members.findUnique({
       where: { member_id: memberId },
       include: {
@@ -225,7 +265,21 @@ export class ArtistService {
       throw new NotFoundException('Member not found');
     }
 
-    return member;
+    let isFollowing = false;
+    if (userId) {
+      const follow = await this.prisma.member_followers.findFirst({
+        where: {
+          member_id: member.member_id,
+          user_id: userId,
+        },
+      });
+      isFollowing = !!follow;
+    }
+
+    return {
+      ...member,
+      isFollowing,
+    };
   }
 
   async findCategories() {
@@ -287,6 +341,53 @@ export class ArtistService {
     return { message: 'Unfollowed' };
   }
 
+  async followMember(memberId: string, userId: string) {
+    const member = await this.prisma.artist_members.findUnique({
+      where: { member_id: memberId },
+    });
+
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    const existing = await this.prisma.member_followers.findFirst({
+      where: {
+        member_id: memberId,
+        user_id: userId,
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.prisma.member_followers.create({
+      data: {
+        member_id: memberId,
+        user_id: userId,
+      },
+    });
+  }
+
+  async unfollowMember(memberId: string, userId: string) {
+    const follow = await this.prisma.member_followers.findFirst({
+      where: {
+        member_id: memberId,
+        user_id: userId,
+      },
+    });
+
+    if (!follow) {
+      return { message: 'Not following' };
+    }
+
+    await this.prisma.member_followers.delete({
+      where: { id: follow.id },
+    });
+
+    return { message: 'Unfollowed' };
+  }
+
   async getFollowing(userId: string) {
     const following = await this.prisma.artist_followers.findMany({
       where: { user_id: userId },
@@ -302,6 +403,22 @@ export class ArtistService {
     });
 
     return following.map(f => f.artist);
+  }
+
+  async getFollowingMembers(userId: string) {
+    const following = await this.prisma.member_followers.findMany({
+      where: { user_id: userId },
+      include: {
+        member: {
+          include: {
+            artist: true,
+          }
+        }
+      },
+      orderBy: { created_at: 'desc' }
+    });
+
+    return following.map(f => f.member);
   }
 
   async update(artistId: string, dto: any) {

@@ -88,6 +88,8 @@ export class LiveStreamService implements OnModuleInit {
         thumbnail_url: dto.thumbnail_url ?? null,
         is_portrait: dto.is_portrait ?? false,
         scheduled_at: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
+        stream_as_type: dto.stream_as_type || 'user',
+        stream_as_id: dto.stream_as_id || null,
       },
     });
 
@@ -814,6 +816,112 @@ export class LiveStreamService implements OnModuleInit {
           status: 'ended',
           replay_url: { not: null },
         },
+      }),
+    ]);
+
+    return {
+      data: items,
+      meta: { page, limit, total, total_pages: Math.ceil(total / limit) },
+    };
+  }
+
+  /** List live streams for a specific artist (including their individual members) */
+  async listArtistStreams(artistId: string, query: PaginationQueryDto) {
+    const { page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+
+    // Get all member IDs for this artist
+    const members = await this.prisma.artist_members.findMany({
+      where: { artist_id: artistId },
+      select: { member_id: true }
+    });
+    const memberIds = members.map(m => m.member_id);
+
+    const whereCondition = {
+      OR: [
+        { stream_as_type: 'artist' as any, stream_as_id: artistId },
+        { stream_as_type: 'member' as any, stream_as_id: { in: memberIds } }
+      ],
+      status: 'live' as any
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.live_streams.findMany({
+        where: whereCondition,
+        include: {
+          host: { 
+            select: { 
+              user_id: true, 
+              fullname: true, 
+              image_url: true,
+              artist_account: {
+                include: {
+                  artist: true,
+                  member: true
+                }
+              }
+            } 
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.live_streams.count({
+        where: whereCondition,
+      }),
+    ]);
+
+    return {
+      data: items,
+      meta: { page, limit, total, total_pages: Math.ceil(total / limit) },
+    };
+  }
+
+  /** List replays for a specific artist (including their individual members) */
+  async listArtistReplays(artistId: string, query: PaginationQueryDto) {
+    const { page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+
+    const members = await this.prisma.artist_members.findMany({
+      where: { artist_id: artistId },
+      select: { member_id: true }
+    });
+    const memberIds = members.map(m => m.member_id);
+
+    const whereCondition = {
+      OR: [
+        { stream_as_type: 'artist' as any, stream_as_id: artistId },
+        { stream_as_type: 'member' as any, stream_as_id: { in: memberIds } }
+      ],
+      status: 'ended' as any,
+      replay_url: { not: null }
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.live_streams.findMany({
+        where: whereCondition,
+        include: {
+          host: { 
+            select: { 
+              user_id: true, 
+              fullname: true, 
+              image_url: true,
+              artist_account: {
+                include: {
+                  artist: true,
+                  member: true
+                }
+              }
+            } 
+          },
+        },
+        orderBy: { ended_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.live_streams.count({
+        where: whereCondition,
       }),
     ]);
 

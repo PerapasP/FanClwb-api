@@ -42,4 +42,14 @@ export class CreateStreamDto {
   @IsOptional()
   @IsDateString()
   scheduled_at?: string;
+
+  @ApiPropertyOptional({ enum: ['user', 'artist', 'member', 'fandom'], default: 'user' })
+  @IsOptional()
+  @IsString()
+  stream_as_type?: 'user' | 'artist' | 'member' | 'fandom';
+
+  @ApiPropertyOptional({ description: 'ID of the artist/member/fandom if streaming as that type' })
+  @IsOptional()
+  @IsUUID()
+  stream_as_id?: string;
 }

@@ -272,7 +272,18 @@ export class LiveStreamController {
   @ApiExcludeEndpoint()
   async onReplayReady(@Body() dto: ReplayReadyDto) {
     this.logger.log(`Replay ready: key=${dto.stream_key} url=${dto.replay_url}`);
-    return this.liveStreamService.setReplayUrl(dto.stream_key, dto.replay_url);
+    const stream = await this.liveStreamService.setReplayUrl(
+      dto.stream_key,
+      dto.replay_url,
+    );
+
+    // Notify fans in the room that the replay is now available
+    this.liveStreamGateway.broadcastReplayReady(
+      stream.stream_id,
+      dto.replay_url,
+    );
+
+    return stream;
   }
 
   // ──────────────────────────────────────────────────────────
@@ -293,5 +304,25 @@ export class LiveStreamController {
     @Query() query: PaginationQueryDto,
   ) {
     return this.liveStreamService.listFandomReplays(fandomId, query);
+  }
+
+  @Get('artist/:artistId')
+  @ApiOperation({ summary: 'List live streams for a specific artist' })
+  @ApiParam({ name: 'artistId', description: 'Artist UUID' })
+  listArtistStreams(
+    @Param('artistId', ParseUUIDPipe) artistId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.liveStreamService.listArtistStreams(artistId, query);
+  }
+
+  @Get('replays/artist/:artistId')
+  @ApiOperation({ summary: 'List replays for a specific artist' })
+  @ApiParam({ name: 'artistId', description: 'Artist UUID' })
+  listArtistReplays(
+    @Param('artistId', ParseUUIDPipe) artistId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.liveStreamService.listArtistReplays(artistId, query);
   }
 }

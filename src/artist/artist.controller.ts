@@ -58,10 +58,21 @@ export class ArtistController {
     return this.artistService.getFollowing(req.user.user_id);
   }
 
+  // GET /artists/me/following-members
+  @Get('me/following-members')
+  @UseGuards(JwtAuthGuard)
+  getFollowingMembers(@Req() req: AuthenticatedRequest) {
+    return this.artistService.getFollowingMembers(req.user.user_id);
+  }
+
   // GET /artists/members/:memberId
   @Get('members/:memberId')
-  findMemberById(@Param('memberId', ParseUUIDPipe) memberId: string) {
-    return this.artistService.findMemberById(memberId);
+  @UseGuards(OptionalJwtAuthGuard)
+  findMemberById(
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Req() req: OptionalAuthRequest,
+  ) {
+    return this.artistService.findMemberById(memberId, req.user?.user_id);
   }
 
   // GET /artists/:artistId
@@ -82,11 +93,13 @@ export class ArtistController {
 
   // GET /artists/:artistId/members/:memberId
   @Get(':artistId/members/:memberId')
+  @UseGuards(OptionalJwtAuthGuard)
   findMember(
     @Param('artistId', ParseUUIDPipe) artistId: string,
     @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Req() req: OptionalAuthRequest,
   ) {
-    return this.artistService.findMember(artistId, memberId);
+    return this.artistService.findMember(artistId, memberId, req.user?.user_id);
   }
 
   // POST /artists/:artistId/follow
@@ -99,6 +112,16 @@ export class ArtistController {
     return this.artistService.follow(artistId, req.user.user_id);
   }
 
+  // POST /artists/members/:memberId/follow
+  @Post('members/:memberId/follow')
+  @UseGuards(JwtAuthGuard)
+  followMember(
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.artistService.followMember(memberId, req.user.user_id);
+  }
+
   // DELETE /artists/:artistId/unfollow
   @Delete(':artistId/unfollow')
   @UseGuards(JwtAuthGuard)
@@ -107,6 +130,17 @@ export class ArtistController {
     @Req() req: AuthenticatedRequest,
   ) {
     await this.artistService.unfollow(artistId, req.user.user_id);
+    return { message: 'Unfollowed' };
+  }
+
+  // DELETE /artists/members/:memberId/unfollow
+  @Delete('members/:memberId/unfollow')
+  @UseGuards(JwtAuthGuard)
+  async unfollowMember(
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.artistService.unfollowMember(memberId, req.user.user_id);
     return { message: 'Unfollowed' };
   }
 

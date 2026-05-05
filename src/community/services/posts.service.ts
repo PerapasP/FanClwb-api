@@ -38,6 +38,7 @@ export class PostsService {
           fandom_id: true,
           name: true,
           slug: true,
+          image_url: true,
         },
       },
       artist: {
@@ -100,23 +101,51 @@ export class PostsService {
   ): Promise<void> {
     if (postAsType === 'user') return;
 
-    const artistAccount = await this.prisma.artist_accounts.findUnique({
-      where: { user_id: userId },
-    });
+    if (postAsType === 'artist' || postAsType === 'member') {
+      const artistAccount = await this.prisma.artist_accounts.findUnique({
+        where: { user_id: userId },
+      });
 
-    if (!artistAccount) {
-      throw new ForbiddenException('No artist account linked');
-    }
+      if (!artistAccount) {
+        throw new ForbiddenException('No artist account linked');
+      }
 
-    if (postAsType === 'artist') {
-      if (!postAsId || artistAccount.artist_id !== postAsId) {
-        throw new ForbiddenException('Cannot post as this artist');
+      if (postAsType === 'artist') {
+        if (!postAsId || artistAccount.artist_id !== postAsId) {
+          throw new ForbiddenException('Cannot post as this artist');
+        }
+      }
+
+      if (postAsType === 'member') {
+        if (!postAsId || artistAccount.member_id !== postAsId) {
+          throw new ForbiddenException('Cannot post as this member');
+        }
       }
     }
 
-    if (postAsType === 'member') {
-      if (!postAsId || artistAccount.member_id !== postAsId) {
-        throw new ForbiddenException('Cannot post as this member');
+    if (postAsType === 'fandom') {
+      if (!postAsId) throw new ForbiddenException('post_as_id required for post_as_type=fandom');
+      
+      const [membership, user, fandom] = await Promise.all([
+        this.prisma.fandom_members.findFirst({
+          where: {
+            fandom_id: postAsId,
+            user_id: userId,
+          },
+        }),
+        this.prisma.users.findUnique({ where: { user_id: userId } }),
+        this.prisma.fandoms.findUnique({ where: { fandom_id: postAsId } })
+      ]);
+
+      const isFandomStaff = membership && (
+        membership.role.toLowerCase() === 'admin' || 
+        membership.role.toLowerCase() === 'moderator'
+      );
+      const isGlobalAdmin = user && user.role.toLowerCase() === 'admin';
+      const isCreator = fandom && fandom.creator_id === userId;
+
+      if (!isFandomStaff && !isGlobalAdmin && !isCreator) {
+        throw new ForbiddenException('Permission denied: You are not authorized to post as this fandom');
       }
     }
   }
@@ -132,19 +161,24 @@ export class PostsService {
       });
 
       if (fandom) {
-        // Check if member or follower
-        const [membership, follower] = await Promise.all([
-          this.prisma.fandom_members.findUnique({
-            where: { fandom_id_user_id: { fandom_id: dto.fandom_id, user_id: userId } }
+        // Check if member, follower, global admin, or creator
+        const [membership, follower, user, fandomFull] = await Promise.all([
+          this.prisma.fandom_members.findFirst({
+            where: { fandom_id: dto.fandom_id, user_id: userId }
           }),
           fandom.artist_id
-            ? this.prisma.artist_followers.findUnique({
-                where: { artist_id_user_id: { artist_id: fandom.artist_id, user_id: userId } }
+            ? this.prisma.artist_followers.findFirst({
+                where: { artist_id: fandom.artist_id, user_id: userId }
               })
             : Promise.resolve(null),
+          this.prisma.users.findUnique({ where: { user_id: userId } }),
+          this.prisma.fandoms.findUnique({ where: { fandom_id: dto.fandom_id } })
         ]);
 
-        if (!membership && !follower) {
+        const isGlobalAdmin = user?.role.toLowerCase() === 'admin';
+        const isCreator = fandomFull?.creator_id === userId;
+
+        if (!membership && !follower && !isGlobalAdmin && !isCreator) {
           throw new ForbiddenException('You must follow the artist or join the fandom to post');
         }
       }
@@ -540,6 +574,44 @@ export class PostsService {
 
     return {
       data: posts.map((post) => this.mapPost(post, currentUserId)),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  // ─── FIND MEMBER FEED ────────────────────────────────
+  async findByMember(
+    memberId: string,
+    query: PaginationQueryDto,
+    userId?: string,
+  ): Promise<PaginatedResult<PostWithRelations>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.postsWhereInput = {
+      post_as_type: 'member',
+      post_as_id: memberId,
+      is_deleted: false,
+    };
+
+    const [posts, total] = await Promise.all([
+      this.prisma.posts.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+        include: this.postInclude(userId),
+      }),
+      this.prisma.posts.count({ where }),
+    ]);
+
+    return {
+      data: posts.map((post) => this.mapPost(post, userId)),
       meta: {
         total,
         page,

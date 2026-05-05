@@ -206,6 +206,14 @@ export class LiveStreamGateway
     });
   }
 
+  broadcastReplayReady(streamId: string, replayUrl: string) {
+    this.logger.log(`Broadcasting replay-ready for streamId: ${streamId}`);
+    this.server.to(`stream:${streamId}`).emit('replay-ready', {
+      streamId,
+      replay_url: replayUrl,
+    });
+  }
+
   broadcastViewerCount(streamId: string, count: number) {
     this.server.to(`stream:${streamId}`).emit('viewer-count', {
       streamId,

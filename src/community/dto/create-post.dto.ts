@@ -23,7 +23,7 @@ export class CreatePostDto {
 
   @IsOptional()
   @IsOptional()
-  @IsIn(['user', 'artist', 'member'])
+  @IsIn(['user', 'artist', 'member', 'fandom'])
   post_as_type?: PostAsType;
 
   @IsOptional()

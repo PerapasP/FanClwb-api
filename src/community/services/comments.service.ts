@@ -389,6 +389,10 @@ export class CommentsService {
         select: {
           user_id: true,
           fullname: true,
+          image_url: true,
+          artist_account: {
+            select: { artist_id: true },
+          },
         },
       },
       images: {

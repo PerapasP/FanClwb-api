@@ -1,107 +1,84 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { UpdateProfileDto, ChangePasswordDto, ProfileResponseDto } from './dto/profile.dto';
-import { UpdateTaxInfoDto, TaxInfoResponseDto } from './dto/tax.dto';
+import { PrismaService } from '@/prisma/prisma.service';
+import { UpdateProfileDto, ChangePasswordDto } from './dto/profile.dto';
+import { UpdateTaxInfoDto } from './dto/tax.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class ProfileService {
-  // Mock data - replace with actual database
-  private profiles: ProfileResponseDto[] = [
-    {
-      id: '1',
-      fullName: 'Admin User',
-      email: 'admin@example.com',
-      phone: '+1234567890',
-      dateOfBirth: '1990-01-01',
-      address: '123 Main St, City, State',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ];
+  constructor(private readonly prisma: PrismaService) {}
 
-  private taxInfos: TaxInfoResponseDto[] = [
-    {
-      id: '1',
-      ssn: '***-**-6789',
-      filingStatus: 'single',
-      annualIncome: 50000,
-      dependents: 0,
-      employer: 'ABC Corporation',
-      userId: '1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ];
+  async getProfile(userId: string) {
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+    });
 
-  async getProfile(userId: string): Promise<ProfileResponseDto> {
-    const profile = this.profiles.find(p => p.id === userId);
-    if (!profile) {
-      throw new NotFoundException(`Profile for user ${userId} not found`);
-    }
-    return profile;
-  }
-
-  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<ProfileResponseDto> {
-    const profileIndex = this.profiles.findIndex(p => p.id === userId);
-    if (profileIndex === -1) {
+    if (!user) {
       throw new NotFoundException(`Profile for user ${userId} not found`);
     }
 
-    const updatedProfile = {
-      ...this.profiles[profileIndex],
-      ...updateProfileDto,
-      updatedAt: new Date(),
-    };
-
-    this.profiles[profileIndex] = updatedProfile;
-    return updatedProfile;
+    return user;
   }
 
-  async changePassword(userId: string, changePasswordDto: ChangePasswordDto): Promise<{ message: string }> {
+  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+    const user = await this.prisma.users.findUnique({
+      where: { user_id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`Profile for user ${userId} not found`);
+    }
+
+    const updatedUser = await this.prisma.users.update({
+      where: { user_id: userId },
+      data: {
+        fullname: updateProfileDto.fullname,
+        email: updateProfileDto.email,
+        phone_number: updateProfileDto.phone,
+        // Add other fields if needed
+      },
+    });
+
+    return updatedUser;
+  }
+
+  async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {
     const { currentPassword, newPassword } = changePasswordDto;
     
-    // In real app, verify current password against database
+    const identity = await this.prisma.user_identities.findFirst({
+      where: { user_id: userId, provider: 'email' },
+    });
+
+    if (!identity || !identity.password) {
+      throw new BadRequestException('Email identity not found');
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, identity.password);
+    if (!isMatch) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
     if (currentPassword === newPassword) {
       throw new BadRequestException('New password must be different from current password');
     }
 
-    // In real app, hash and save the new password
-    console.log(`Password changed for user ${userId}`);
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user_identities.update({
+      where: { id: identity.id },
+      data: { password: hashedPassword },
+    });
     
     return { message: 'Password changed successfully' };
   }
 
-  async getTaxInfo(userId: string): Promise<TaxInfoResponseDto> {
-    const taxInfo = this.taxInfos.find(t => t.userId === userId);
-    if (!taxInfo) {
-      throw new NotFoundException(`Tax information for user ${userId} not found`);
-    }
-    return taxInfo;
+  async getTaxInfo(userId: string) {
+    // Implement if needed
+    return { userId };
   }
 
-  async updateTaxInfo(userId: string, updateTaxInfoDto: UpdateTaxInfoDto): Promise<TaxInfoResponseDto> {
-    const taxInfoIndex = this.taxInfos.findIndex(t => t.userId === userId);
-    
-    if (taxInfoIndex === -1) {
-      // Create new tax info if doesn't exist
-      const newTaxInfo: TaxInfoResponseDto = {
-        id: (this.taxInfos.length + 1).toString(),
-        ...updateTaxInfoDto,
-        userId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      this.taxInfos.push(newTaxInfo);
-      return newTaxInfo;
-    }
-
-    // Update existing tax info
-    const updatedTaxInfo = {
-      ...this.taxInfos[taxInfoIndex],
-      ...updateTaxInfoDto,
-      updatedAt: new Date(),
-    };
-
-    this.taxInfos[taxInfoIndex] = updatedTaxInfo;
-    return updatedTaxInfo;
+  async updateTaxInfo(userId: string, updateTaxInfoDto: UpdateTaxInfoDto) {
+    // Implement if needed
+    return { userId, ...updateTaxInfoDto };
   }
 }

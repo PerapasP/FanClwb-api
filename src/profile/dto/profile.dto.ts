@@ -11,7 +11,7 @@ export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'John Doe' })
   @IsOptional()
   @IsString()
-  fullName?: string;
+  fullname?: string;
 
   @ApiPropertyOptional({ example: 'user@example.com' })
   @IsOptional()
@@ -50,7 +50,10 @@ export class ProfileResponseDto {
   id: string;
 
   @ApiProperty()
-  fullName: string;
+  fullname: string;
+
+  @ApiPropertyOptional()
+  image_url?: string;
 
   @ApiProperty()
   email: string;

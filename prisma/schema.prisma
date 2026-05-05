@@ -32,6 +32,7 @@ model users {
   artist_account     artist_accounts?
   fandom_memberships fandom_members[]
   followed_artists   artist_followers[]
+  followed_members   member_followers[]
 
   // Live streaming
   hosted_streams  live_streams[]    @relation("StreamHost")
@@ -209,6 +210,7 @@ model artist_members {
   sns_links    member_sns[]
 
   artist_account artist_accounts?
+  followers      member_followers[]
 
   @@index([artist_id, is_active])
   @@index([sort_order])
@@ -334,6 +336,20 @@ model artist_followers {
 
   @@unique([artist_id, user_id])
   @@index([artist_id])
+  @@index([user_id])
+}
+
+model member_followers {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  member_id  String   @db.Uuid
+  user_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  member artist_members @relation(fields: [member_id], references: [member_id], onDelete: Cascade)
+  user   users          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([member_id, user_id])
+  @@index([member_id])
   @@index([user_id])
 }
 
@@ -529,6 +545,9 @@ model live_streams {
   peak_viewer_count Int          @default(0)
   total_gifts_coins Int          @default(0)
 
+  stream_as_type  PostAsType   @default(user)
+  stream_as_id    String?      @db.Uuid
+
   scheduled_at DateTime? @db.Timestamptz(6)
   started_at   DateTime? @db.Timestamptz(6)
   ended_at     DateTime? @db.Timestamptz(6)
@@ -659,6 +678,7 @@ enum PostAsType {
   user
   artist
   member
+  fandom
 }
 
 enum ReactionType {

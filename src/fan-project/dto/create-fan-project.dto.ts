@@ -9,6 +9,10 @@ export class TierDto {
   @IsString()
   @IsNotEmpty()
   title: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
 }
 
 export class CreateFanProjectDto {

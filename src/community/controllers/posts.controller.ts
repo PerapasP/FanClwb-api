@@ -68,6 +68,16 @@ export class PostsController {
     return this.postsService.findByUser(userId, query, req.user?.user_id);
   }
 
+  @Get('member/:memberId')
+  @UseGuards(OptionalJwtAuthGuard)
+  findByMember(
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Query() query: PaginationQueryDto,
+    @Req() req: OptionalAuthRequest,
+  ) {
+    return this.postsService.findByMember(memberId, query, req.user?.user_id);
+  }
+
   @Get(':postId')
   @UseGuards(OptionalJwtAuthGuard)
   findOne(
