@@ -837,10 +837,23 @@ export class LiveStreamService implements OnModuleInit {
     });
     const memberIds = members.map(m => m.member_id);
 
+    // 2. Get fandom and host user ID
+    const artist = await this.prisma.artists.findUnique({
+      where: { artist_id: artistId },
+      include: { 
+        fandom: { select: { fandom_id: true } },
+        artist_account: { select: { user_id: true } }
+      }
+    });
+    const fandomId = artist?.fandom?.fandom_id;
+    const hostUserId = artist?.artist_account?.user_id;
+
     const whereCondition = {
       OR: [
         { stream_as_type: 'artist' as any, stream_as_id: artistId },
-        { stream_as_type: 'member' as any, stream_as_id: { in: memberIds } }
+        { stream_as_type: 'member' as any, stream_as_id: { in: memberIds } },
+        ...(fandomId ? [{ fandom_id: fandomId }] : []),
+        ...(hostUserId ? [{ host_user_id: hostUserId }] : [])
       ],
       status: 'live' as any
     };
@@ -883,19 +896,36 @@ export class LiveStreamService implements OnModuleInit {
     const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
-    const members = await this.prisma.artist_members.findMany({
+    // 1. Get all related IDs for this artist
+    const artist = await this.prisma.artists.findUnique({
       where: { artist_id: artistId },
-      select: { member_id: true }
+      include: { 
+        fandom: { select: { fandom_id: true } },
+        artist_account: { select: { user_id: true } },
+        members: { select: { member_id: true } }
+      }
     });
-    const memberIds = members.map(m => m.member_id);
+
+    if (!artist) {
+      return {
+        data: [],
+        meta: { page, limit, total: 0, total_pages: 0 }
+      };
+    }
+
+    const memberIds = artist.members.map(m => m.member_id);
+    const fandomId = artist.fandom?.fandom_id;
+    const hostUserId = artist.artist_account?.user_id;
 
     const whereCondition = {
       OR: [
-        { stream_as_type: 'artist' as any, stream_as_id: artistId },
-        { stream_as_type: 'member' as any, stream_as_id: { in: memberIds } }
+        { stream_as_id: artistId },
+        { stream_as_id: { in: memberIds } },
+        ...(fandomId ? [{ fandom_id: fandomId }] : []),
+        ...(hostUserId ? [{ host_user_id: hostUserId }] : [])
       ],
       status: 'ended' as any,
-      replay_url: { not: null }
+      replay_url: { not: null, notIn: [''] }
     };
 
     const [items, total] = await Promise.all([
